@@ -7,7 +7,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
-Future<void> main() async {
+final List<String> symbols = [
+  'EURUSD', 'XAUUSD', 'GBPUSD', 'USDJPY', 'USDCHF',
+  'AUDUSD', 'AUDJPY', 'CADJPY', 'EURJPY',
+  'BTCUSD', 'ETHUSD', 'ADAUSD',
+  'DowJones', 'NASDAQ', 'S&P500',
+];
+
+final List<String> timeframes = [
+  'M1', 'M2', 'M3', 'M4',
+  'M5', 'M6', 'M10', 'M12',
+  'M15', 'M20', 'M30', 'H1',
+  'H2', 'H3', 'H4', 'H6',
+  'H8', 'H12', 'D1', 'W1',
+];
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   runApp(const MyApp());
@@ -15,7 +30,6 @@ Future<void> main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -28,15 +42,16 @@ class MyApp extends StatelessWidget {
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
-
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
   String? _fcmToken;
-  String _userId = 'user_123'; // می‌تونی به UID فایربیس تغییر بدی
+  String _userId = 'user_123';
   bool _isRegistered = false;
+  Map<String, Set<String>> subscribed = {};
+  List<String> _receivedImages = [];
 
   @override
   void initState() {
@@ -45,20 +60,22 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _initFirebase() async {
-    // دریافت FCM token
     String? token = await FirebaseMessaging.instance.getToken();
     if (token != null) {
-      setState(() {
-        _fcmToken = token;
-      });
-      // ثبت در سرور
+      setState(() => _fcmToken = token);
       await _registerOnServer(token);
     }
 
-    // گوش دادن به نوتیفیکیشن‌های ورودی
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      final imageUrl = message.data['image_url'];
+      if (imageUrl != null) {
+        setState(() {
+          _receivedImages.insert(0, imageUrl);
+        });
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('🔔 ${message.notification?.title}')),
+        SnackBar(content: Text('🔔 ${message.notification?.title ?? "سیگنال جدید"}')),
       );
     });
   }
@@ -71,9 +88,7 @@ class _HomePageState extends State<HomePage> {
         body: jsonEncode({'user_id': _userId, 'fcm_token': token}),
       );
       if (response.statusCode == 200) {
-        setState(() {
-          _isRegistered = true;
-        });
+        setState(() => _isRegistered = true);
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_id', _userId);
       }
@@ -84,7 +99,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _subscribe(String symbol, String timeframe) async {
     if (!_isRegistered) return;
-
     try {
       final response = await http.post(
         Uri.parse('$SERVER_URL/subscribe'),
@@ -96,42 +110,102 @@ class _HomePageState extends State<HomePage> {
         }),
       );
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('✅ سابسکرایب شد: $symbol - $timeframe')),
-        );
+        setState(() {
+          subscribed.putIfAbsent(symbol, () => {}).add(timeframe);
+        });
       }
     } catch (e) {
       print('❌ خطا در سابسکرایب: $e');
     }
   }
 
+  Future<void> _unsubscribe(String symbol, String timeframe) async {
+    if (!_isRegistered) return;
+    try {
+      final response = await http.post(
+        Uri.parse('$SERVER_URL/unsubscribe'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'user_id': _userId,
+          'symbol': symbol,
+          'timeframe': timeframe,
+        }),
+      );
+      if (response.statusCode == 200) {
+        setState(() {
+          subscribed[symbol]?.remove(timeframe);
+        });
+      }
+    } catch (e) {
+      print('❌ خطا در لغو سابسکرایب: $e');
+    }
+  }
+
+  List<Widget> buildSymbolTiles() {
+    return symbols.map((symbol) {
+      return ExpansionTile(
+        title: Text(symbol),
+        children: [
+          GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: timeframes.map((tf) {
+              final isActive = subscribed[symbol]?.contains(tf) ?? false;
+              return Padding(
+                padding: const EdgeInsets.all(4.0),
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isActive ? Colors.green : Colors.red,
+                  ),
+                  onPressed: () {
+                    if (isActive) {
+                      _unsubscribe(symbol, tf);
+                    } else {
+                      _subscribe(symbol, tf);
+                    }
+                  },
+                  child: Text(tf),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      );
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ارسال سیگنال چارت')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('وضعیت: ${_isRegistered ? "✅ ثبت‌شده" : "❌ ثبت نشده"}'),
-            const SizedBox(height: 20),
-            const Text('انتخاب جفت‌ارز و تایم‌فریم:'),
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: () => _subscribe('EURUSD', 'M5'),
-              child: const Text('EURUSD - M5'),
+      appBar: AppBar(title: const Text('مدیریت سیگنال چارت')),
+      body: Column(
+        children: [
+          Expanded(child: ListView(children: buildSymbolTiles())),
+          const Divider(),
+          const Text('📸 تصاویر دریافت‌شده'),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _receivedImages.length,
+              itemBuilder: (context, index) {
+                final url = _receivedImages[index];
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Image.network(url),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text('چارت دریافت‌شده', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-            ElevatedButton(
-              onPressed: () => _subscribe('XAUUSD', 'H1'),
-              child: const Text('XAUUSD - H1'),
-            ),
-            ElevatedButton(
-              onPressed: () => _subscribe('BTCUSD', 'M15'),
-              child: const Text('BTCUSD - M15'),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
