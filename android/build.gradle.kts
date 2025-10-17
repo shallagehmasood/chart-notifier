@@ -23,5 +23,6 @@ tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
 dependencies {
-    classpath 'com.google.gms:google-services:4.4.0'  // <-- این خط
+    classpath("com.android.tools.build:gradle:8.3.0")
+    classpath("com.google.gms:google-services:4.4.0") // ✅ درست
 }
