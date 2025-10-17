@@ -1,0 +1,13 @@
+# Flutter
+/build/
+/.dart_tool/
+/.pub-cache/
+/.pub/
+*.log
+.DS_Store
+
+# Firebase (معمولاً ذخیره می‌شه، ولی اگر نمی‌خوای عمومی باشه، کامنت کن)
+# google-services.json
+
+# Local config
+.env
