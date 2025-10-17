@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:photo_view/photo_view.dart';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
@@ -47,8 +47,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  String? _fcmToken;
   String _userId = 'user_123';
+  String? _fcmToken;
   bool _isRegistered = false;
   Map<String, Set<String>> subscribed = {};
   List<String> _receivedImages = [];
@@ -57,13 +57,14 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _initFirebase();
+    _handleNotificationClick();
   }
 
   Future<void> _initFirebase() async {
-    String? token = await FirebaseMessaging.instance.getToken();
-    if (token != null) {
-      setState(() => _fcmToken = token);
-      await _registerOnServer(token);
+    _fcmToken = await FirebaseMessaging.instance.getToken();
+    if (_fcmToken != null) {
+      await _registerOnServer(_fcmToken!);
+      await _loadSubscriptions();
     }
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -73,72 +74,89 @@ class _HomePageState extends State<HomePage> {
           _receivedImages.insert(0, imageUrl);
         });
       }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('🔔 ${message.notification?.title ?? "سیگنال جدید"}')),
-      );
     });
   }
 
-  Future<void> _registerOnServer(String token) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$SERVER_URL/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_id': _userId, 'fcm_token': token}),
-      );
-      if (response.statusCode == 200) {
-        setState(() => _isRegistered = true);
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_id', _userId);
+  void _handleNotificationClick() async {
+    RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage?.data['image_url'] != null) {
+      _showImageFullScreen(initialMessage!.data['image_url']!);
+    }
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      final imageUrl = message.data['image_url'];
+      if (imageUrl != null) {
+        _showImageFullScreen(imageUrl);
       }
-    } catch (e) {
-      print('❌ خطا در ثبت: $e');
+    });
+  }
+
+  void _showImageFullScreen(String imageUrl) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('نمایش تصویر')),
+          body: PhotoView(
+            imageProvider: NetworkImage(imageUrl),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _registerOnServer(String token) async {
+    final response = await http.post(
+      Uri.parse('$SERVER_URL/register'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': _userId, 'fcm_token': token}),
+    );
+    if (response.statusCode == 200) {
+      setState(() => _isRegistered = true);
+    }
+  }
+
+  Future<void> _loadSubscriptions() async {
+    final response = await http.post(
+      Uri.parse('$SERVER_URL/subscriptions'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': _userId}),
+    );
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final List subs = data['subscriptions'];
+      setState(() {
+        subscribed.clear();
+        for (var sub in subs) {
+          final symbol = sub['symbol'];
+          final tf = sub['timeframe'];
+          subscribed.putIfAbsent(symbol, () => {}).add(tf);
+        }
+      });
     }
   }
 
   Future<void> _subscribe(String symbol, String timeframe) async {
-    if (!_isRegistered) return;
-    try {
-      final response = await http.post(
-        Uri.parse('$SERVER_URL/subscribe'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_id': _userId,
-          'symbol': symbol,
-          'timeframe': timeframe,
-        }),
-      );
-      if (response.statusCode == 200) {
-        setState(() {
-          subscribed.putIfAbsent(symbol, () => {}).add(timeframe);
-        });
-      }
-    } catch (e) {
-      print('❌ خطا در سابسکرایب: $e');
-    }
+    await http.post(
+      Uri.parse('$SERVER_URL/subscribe'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': _userId, 'symbol': symbol, 'timeframe': timeframe}),
+    );
+    setState(() {
+      subscribed.putIfAbsent(symbol, () => {}).add(timeframe);
+    });
   }
 
   Future<void> _unsubscribe(String symbol, String timeframe) async {
-    if (!_isRegistered) return;
-    try {
-      final response = await http.post(
-        Uri.parse('$SERVER_URL/unsubscribe'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_id': _userId,
-          'symbol': symbol,
-          'timeframe': timeframe,
-        }),
-      );
-      if (response.statusCode == 200) {
-        setState(() {
-          subscribed[symbol]?.remove(timeframe);
-        });
-      }
-    } catch (e) {
-      print('❌ خطا در لغو سابسکرایب: $e');
-    }
+    await http.post(
+      Uri.parse('$SERVER_URL/unsubscribe'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': _userId, 'symbol': symbol, 'timeframe': timeframe}),
+    );
+    setState(() {
+      subscribed[symbol]?.remove(timeframe);
+    });
   }
 
   List<Widget> buildSymbolTiles() {
@@ -154,18 +172,26 @@ class _HomePageState extends State<HomePage> {
               final isActive = subscribed[symbol]?.contains(tf) ?? false;
               return Padding(
                 padding: const EdgeInsets.all(4.0),
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isActive ? Colors.green : Colors.red,
+                child: SizedBox(
+                  width: 60,
+                  height: 40,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isActive ? Colors.green : Colors.red,
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: () {
+                      if (isActive) {
+                        _unsubscribe(symbol, tf);
+                      } else {
+                        _subscribe(symbol, tf);
+                      }
+                    },
+                    child: Text(tf, style: const TextStyle(fontSize: 12)),
                   ),
-                  onPressed: () {
-                    if (isActive) {
-                      _unsubscribe(symbol, tf);
-                    } else {
-                      _subscribe(symbol, tf);
-                    }
-                  },
-                  child: Text(tf),
                 ),
               );
             }).toList(),
@@ -189,17 +215,20 @@ class _HomePageState extends State<HomePage> {
               itemCount: _receivedImages.length,
               itemBuilder: (context, index) {
                 final url = _receivedImages[index];
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Image.network(url),
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Text('چارت دریافت‌شده', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                    ],
+                return GestureDetector(
+                  onTap: () => _showImageFullScreen(url),
+                  child: Card(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Image.network(url),
+                        const Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: Text('چارت دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
