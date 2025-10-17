@@ -1,3 +1,6 @@
+def flutterVersionCode = 1
+def flutterVersionName = "1.0.0"
+
 allprojects {
     repositories {
         google()
