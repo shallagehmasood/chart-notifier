@@ -1,11 +1,22 @@
+
 workflows:
-  flutter-android-debug:
-    name: Build Android Debug APK
-    max_build_duration: 30
+  build_apk:
+    name: Build Flutter APK
+    max_build_duration: 20
     environment:
       flutter: stable
     scripts:
-      - flutter pub get
-      - flutter build apk --debug --split-per-abi
+      - name: Install dependencies
+        script: flutter pub outdated
+
+
+      - name: Build APK
+        script: flutter build apk --release
+
     artifacts:
-      - build/app/outputs/flutter-apk/*.apk
+      - build/app/outputs/flutter-apk/app-release.apk
+
+    publishing:
+      email:
+        recipients:
+          - shallagehsaeed@gmail.com
