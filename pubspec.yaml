@@ -1,38 +1,35 @@
-name: chart_notifier_app
-description: "A new Flutter project."
-publish_to: 'none'
-
+name: signal_chart_app
+description: مدیریت سیگنال چارت
+publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.9.2
+  sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-
-  cupertino_icons: ^1.0.8
   firebase_core: ^2.25.0
-  firebase_messaging: ^14.7.0
-  http: ^0.13.6
-  shared_preferences: ^2.2.2
-  photo_view: ^0.14.0
-  path_provider: ^2.1.1
-  permission_handler: ^11.0.0
+  firebase_messaging: ^14.6.0
+  http: ^1.2.2
+  photo_view: ^0.15.0
+  shared_preferences: ^2.1.1
+  permission_handler: ^10.4.0
+  path_provider: ^2.0.15
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^5.0.0
-  flutter_launcher_icons: ^0.10.0
+  flutter_launcher_icons: ^0.11.0
 
 flutter_icons:
   android: true
   ios: true
-  image_path: "assets/icon.PNG"
+  image_path: "assets/icon.png"  # مسیر فایل آیکن شما
+  remove_alpha_ios: true         # حذف شفافیت در iOS
+  adaptive_icon_background: "#ffffff"  # رنگ پس‌زمینه آیکن adaptive اندروید
 
 flutter:
   uses-material-design: true
-
   assets:
-    - assets/icon.PNG
+    - assets/icon.png
