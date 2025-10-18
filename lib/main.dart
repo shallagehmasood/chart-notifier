@@ -19,21 +19,18 @@ final List<String> symbols = [
 ];
 
 final List<String> timeframes = [
-  'M1', 'M2', 'M3', 'M4',
-  'M5', 'M6', 'M10', 'M12',
-  'M15', 'M20', 'M30', 'H1',
-  'H2', 'H3', 'H4', 'H6',
-  'H8', 'H12', 'D1', 'W1',
+  'M1', 'M2', 'M3', 'M4', 'M5', 'M6',
+  'M10', 'M12', 'M15', 'M20', 'M30', 'H1',
+  'H2', 'H3', 'H4', 'H6', 'H8', 'H12', 'D1', 'W1',
 ];
 
-/// 🧩 تابعی که وقتی اپ کاملاً بسته است و نوتیف می‌رسد اجرا می‌شود
+/// 🧩 هندلر مخصوص وقتی اپ کاملاً بسته است (Terminated)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 
   final imageUrl = message.data['image_url'];
   if (imageUrl != null) {
     final prefs = await SharedPreferences.getInstance();
-
     final images = prefs.getStringList('images') ?? [];
     final filenames = prefs.getStringList('filenames') ?? [];
 
@@ -44,7 +41,6 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final timeframe = parts.length > 1 ? parts[1] : '';
     final label = '$symbol|$timeframe';
 
-    // به ابتدای لیست اضافه می‌کنیم تا ترتیب زمانی حفظ شود
     images.insert(0, imageUrl);
     filenames.insert(0, label);
 
@@ -56,10 +52,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-
-  // ثبت تابع بک‌گراند برای دریافت نوتیف در حالت بسته
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
   runApp(const MyApp());
 }
 
@@ -82,7 +75,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  String _userId = 'user_123';
+  String _userId = '';
   String? _fcmToken;
   Map<String, Set<String>> subscribed = {};
   List<String> _receivedImages = [];
@@ -91,11 +84,32 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _loadImagesFromStorage();
-    _initFirebase();
-    _handleNotificationClick();
+    _initApp();
   }
 
+  /// 🌟 مرحله‌ی اصلی راه‌اندازی
+  Future<void> _initApp() async {
+    await _loadImagesFromStorage();
+    await _initUserId();
+    await _initFirebase();
+    await _handleNotificationClick();
+  }
+
+  /// 🆕 تولید شناسه منحصربه‌فرد برای هر نصب
+  Future<void> _initUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? savedId = prefs.getString('user_id');
+    if (savedId == null) {
+      savedId = 'user_${DateTime.now().millisecondsSinceEpoch}_${UniqueKey()}';
+      await prefs.setString('user_id', savedId);
+    }
+    setState(() {
+      _userId = savedId!;
+    });
+    debugPrint('🧩 User ID: $_userId');
+  }
+
+  /// 🚀 تنظیم Firebase و Listenerها
   Future<void> _initFirebase() async {
     _fcmToken = await FirebaseMessaging.instance.getToken();
     if (_fcmToken != null) {
@@ -103,7 +117,7 @@ class _HomePageState extends State<HomePage> {
       await _loadSubscriptions();
     }
 
-    // وقتی اپ باز است (Foreground)
+    // اپ باز است (Foreground)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
@@ -112,22 +126,28 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _handleNotificationClick() async {
-    // وقتی اپ با کلیک روی نوتیف باز می‌شود
-    RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+  /// 🔔 وقتی اپ از نوتیف باز می‌شود (بک‌گراند یا بسته)
+  Future<void> _handleNotificationClick() async {
+    // اگر اپ از حالت بسته باز شده باشد
+    RemoteMessage? initialMessage =
+        await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage?.data['image_url'] != null) {
       _handleIncomingImage(initialMessage!.data['image_url']!);
     }
 
-    // وقتی کاربر روی نوتیف می‌زند در حالت بک‌گراند
+    // اگر در بک‌گراند بوده
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
         _handleIncomingImage(imageUrl);
       }
     });
+
+    // همیشه بعد از باز شدن اپ، لیست تصاویر را بخوان
+    await _loadImagesFromStorage();
   }
 
+  /// 📥 ذخیره تصویر جدید
   void _handleIncomingImage(String imageUrl) async {
     final filenameWithExt = imageUrl.split('/').last;
     final filename = filenameWithExt.split('.').first;
@@ -143,12 +163,14 @@ class _HomePageState extends State<HomePage> {
     await _saveImagesToStorage();
   }
 
+  /// 💾 ذخیره لیست در حافظه
   Future<void> _saveImagesToStorage() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('images', _receivedImages);
     await prefs.setStringList('filenames', _receivedFilenames);
   }
 
+  /// 📂 خواندن تصاویر ذخیره‌شده
   Future<void> _loadImagesFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
     final images = prefs.getStringList('images') ?? [];
@@ -159,6 +181,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// 📡 ثبت کاربر در سرور
   Future<void> _registerOnServer(String token) async {
     await http.post(
       Uri.parse('$SERVER_URL/register'),
@@ -167,6 +190,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 🧾 گرفتن اشتراک‌های کاربر از سرور
   Future<void> _loadSubscriptions() async {
     final response = await http.post(
       Uri.parse('$SERVER_URL/subscriptions'),
@@ -209,6 +233,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  /// 📸 ذخیره تصویر در حافظه گوشی
   Future<void> _saveImageToGallery(String imageUrl) async {
     var status = await Permission.storage.request();
     if (!status.isGranted) return;
@@ -236,6 +261,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 🖼 نمایش تمام‌صفحه تصویر
   void _showImageFullScreen(String imageUrl) {
     Navigator.push(
       context,
@@ -286,6 +312,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// ساخت لیست نمادها و تایم‌فریم‌ها
   List<Widget> buildSymbolTiles() {
     return symbols.map((symbol) {
       return ExpansionTile(
@@ -347,7 +374,7 @@ class _HomePageState extends State<HomePage> {
                 final url = _receivedImages[index];
                 final meta = _receivedFilenames[index];
                 final parts = meta.split('|');
-                final symbol = parts.length > 0 ? parts[0] : '';
+                final symbol = parts.isNotEmpty ? parts[0] : '';
                 final timeframe = parts.length > 1 ? parts[1] : '';
 
                 return GestureDetector(
