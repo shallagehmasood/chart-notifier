@@ -4,6 +4,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
 import 'package:photo_view/photo_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:image_downloader/image_downloader.dart';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
@@ -52,10 +55,12 @@ class _HomePageState extends State<HomePage> {
   bool _isRegistered = false;
   Map<String, Set<String>> subscribed = {};
   List<String> _receivedImages = [];
+  List<String> _receivedFilenames = [];
 
   @override
   void initState() {
     super.initState();
+    _loadImagesFromStorage();
     _initFirebase();
     _handleNotificationClick();
   }
@@ -70,9 +75,7 @@ class _HomePageState extends State<HomePage> {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
-        setState(() {
-          _receivedImages.insert(0, imageUrl);
-        });
+        _handleIncomingImage(imageUrl);
       }
     });
   }
@@ -80,30 +83,46 @@ class _HomePageState extends State<HomePage> {
   void _handleNotificationClick() async {
     RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage?.data['image_url'] != null) {
-      _showImageFullScreen(initialMessage!.data['image_url']!);
+      _handleIncomingImage(initialMessage!.data['image_url']!);
     }
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
-        _showImageFullScreen(imageUrl);
+        _handleIncomingImage(imageUrl);
       }
     });
   }
 
-  void _showImageFullScreen(String imageUrl) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('نمایش تصویر')),
-          body: PhotoView(
-            imageProvider: NetworkImage(imageUrl),
-            backgroundDecoration: const BoxDecoration(color: Colors.black),
-          ),
-        ),
-      ),
-    );
+  void _handleIncomingImage(String imageUrl) {
+    final filenameWithExt = imageUrl.split('/').last;
+    final filename = filenameWithExt.split('.').first;
+    final parts = filename.split('_');
+    final symbol = parts.isNotEmpty ? parts[0] : '';
+    final timeframe = parts.length > 1 ? parts[1] : '';
+    final label = '$symbol|$timeframe';
+
+    setState(() {
+      _receivedImages.insert(0, imageUrl);
+      _receivedFilenames.insert(0, label);
+    });
+    _saveImagesToStorage();
+  }
+
+  Future<void> _saveImagesToStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('images', _receivedImages);
+    await prefs.setStringList('filenames', _receivedFilenames);
+  }
+
+  Future<void> _loadImagesFromStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final images = prefs.getStringList('images') ?? [];
+    final filenames = prefs.getStringList('filenames') ?? [];
+    setState(() {
+      _receivedImages = images;
+      _receivedFilenames = filenames;
+    });
   }
 
   Future<void> _registerOnServer(String token) async {
@@ -159,6 +178,63 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  void _showImageFullScreen(String imageUrl) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('نمایش تصویر')),
+          body: Stack(
+            children: [
+              PhotoView(
+                imageProvider: NetworkImage(imageUrl),
+                backgroundDecoration: const BoxDecoration(color: Colors.black),
+              ),
+              Positioned(
+                bottom: 20,
+                left: 20,
+                right: 20,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        var status = await Permission.storage.request();
+                        if (!status.isGranted) return;
+                        await ImageDownloader.downloadImage(imageUrl);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ تصویر ذخیره شد')));
+                        }
+                      },
+                      icon: const Icon(Icons.download),
+                      label: const Text('ذخیره'),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          final index = _receivedImages.indexOf(imageUrl);
+                          if (index != -1) {
+                            _receivedImages.removeAt(index);
+                            _receivedFilenames.removeAt(index);
+                          }
+                        });
+                        _saveImagesToStorage();
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.delete),
+                      label: const Text('حذف'),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   List<Widget> buildSymbolTiles() {
     return symbols.map((symbol) {
       return ExpansionTile(
@@ -208,24 +284,39 @@ class _HomePageState extends State<HomePage> {
       body: Column(
         children: [
           Expanded(child: ListView(children: buildSymbolTiles())),
-          const Divider(),
-          const Text('📸 تصاویر دریافت‌شده'),
+                    const Divider(),
+          const Padding(
+            padding: EdgeInsets.all(8.0),
+            child: Text('📸 تصاویر دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
           Expanded(
             child: ListView.builder(
               itemCount: _receivedImages.length,
               itemBuilder: (context, index) {
                 final url = _receivedImages[index];
+                final meta = _receivedFilenames[index];
+                final parts = meta.split('|');
+                final symbol = parts.length > 0 ? parts[0] : '';
+                final timeframe = parts.length > 1 ? parts[1] : '';
+
                 return GestureDetector(
                   onTap: () => _showImageFullScreen(url),
                   child: Card(
-                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Image.network(url),
-                        const Padding(
-                          padding: EdgeInsets.all(8.0),
-                          child: Text('چارت دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('چارت دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text('📈 نماد: $symbol', style: const TextStyle(fontSize: 12)),
+                              Text('⏱ تایم‌فریم: $timeframe', style: const TextStyle(fontSize: 12)),
+                            ],
+                          ),
                         ),
                       ],
                     ),
