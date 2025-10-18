@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -6,7 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:photo_view/photo_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:gallery_saver/gallery_saver.dart';
+import 'package:path_provider/path_provider.dart';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
@@ -52,7 +53,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   String _userId = 'user_123';
   String? _fcmToken;
-  bool _isRegistered = false;
   Map<String, Set<String>> subscribed = {};
   List<String> _receivedImages = [];
   List<String> _receivedFilenames = [];
@@ -126,14 +126,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _registerOnServer(String token) async {
-    final response = await http.post(
+    await http.post(
       Uri.parse('$SERVER_URL/register'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'user_id': _userId, 'fcm_token': token}),
     );
-    if (response.statusCode == 200) {
-      setState(() => _isRegistered = true);
-    }
   }
 
   Future<void> _loadSubscriptions() async {
@@ -181,9 +178,27 @@ class _HomePageState extends State<HomePage> {
   Future<void> _saveImageToGallery(String imageUrl) async {
     var status = await Permission.storage.request();
     if (!status.isGranted) return;
-    final success = await GallerySaver.saveImage(imageUrl);
-    if (success == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ تصویر ذخیره شد')));
+
+    try {
+      final response = await http.get(Uri.parse(imageUrl));
+      if (response.statusCode == 200) {
+        final bytes = response.bodyBytes;
+        final directory = await getExternalStorageDirectory();
+        final path = '${directory!.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final file = File(path);
+        await file.writeAsBytes(bytes);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('✅ تصویر ذخیره شد: ${file.path}')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ خطا در ذخیره تصویر: $e')),
+        );
+      }
     }
   }
 
@@ -258,10 +273,77 @@ class _HomePageState extends State<HomePage> {
                       backgroundColor: isActive ? Colors.green : Colors.red,
                       padding: EdgeInsets.zero,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                                                borderRadius: BorderRadius.circular(8),
                       ),
                     ),
                     onPressed: () {
                       if (isActive) {
                         _unsubscribe(symbol, tf);
                       } else {
+                        _subscribe(symbol, tf);
+                      }
+                    },
+                    child: Text(tf, style: const TextStyle(fontSize: 12)),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      );
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('مدیریت سیگنال چارت')),
+      body: Column(
+        children: [
+          Expanded(child: ListView(children: buildSymbolTiles())),
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.all(8.0),
+            child: Text('📸 تصاویر دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _receivedImages.length,
+              itemBuilder: (context, index) {
+                final url = _receivedImages[index];
+                final meta = _receivedFilenames[index];
+                final parts = meta.split('|');
+                final symbol = parts.length > 0 ? parts[0] : '';
+                final timeframe = parts.length > 1 ? parts[1] : '';
+
+                return GestureDetector(
+                  onTap: () => _showImageFullScreen(url),
+                  child: Card(
+                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Image.network(url),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('چارت دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text('📈 نماد: $symbol', style: const TextStyle(fontSize: 12)),
+                              Text('⏱ تایم‌فریم: $timeframe', style: const TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
