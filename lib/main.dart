@@ -26,9 +26,40 @@ final List<String> timeframes = [
   'H8', 'H12', 'D1', 'W1',
 ];
 
+/// 🧩 تابعی که وقتی اپ کاملاً بسته است و نوتیف می‌رسد اجرا می‌شود
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+
+  final imageUrl = message.data['image_url'];
+  if (imageUrl != null) {
+    final prefs = await SharedPreferences.getInstance();
+
+    final images = prefs.getStringList('images') ?? [];
+    final filenames = prefs.getStringList('filenames') ?? [];
+
+    final filenameWithExt = imageUrl.split('/').last;
+    final filename = filenameWithExt.split('.').first;
+    final parts = filename.split('_');
+    final symbol = parts.isNotEmpty ? parts[0] : '';
+    final timeframe = parts.length > 1 ? parts[1] : '';
+    final label = '$symbol|$timeframe';
+
+    // به ابتدای لیست اضافه می‌کنیم تا ترتیب زمانی حفظ شود
+    images.insert(0, imageUrl);
+    filenames.insert(0, label);
+
+    await prefs.setStringList('images', images);
+    await prefs.setStringList('filenames', filenames);
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  // ثبت تابع بک‌گراند برای دریافت نوتیف در حالت بسته
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   runApp(const MyApp());
 }
 
@@ -72,6 +103,7 @@ class _HomePageState extends State<HomePage> {
       await _loadSubscriptions();
     }
 
+    // وقتی اپ باز است (Foreground)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
@@ -81,11 +113,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handleNotificationClick() async {
+    // وقتی اپ با کلیک روی نوتیف باز می‌شود
     RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage?.data['image_url'] != null) {
       _handleIncomingImage(initialMessage!.data['image_url']!);
     }
 
+    // وقتی کاربر روی نوتیف می‌زند در حالت بک‌گراند
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
@@ -94,7 +128,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void _handleIncomingImage(String imageUrl) {
+  void _handleIncomingImage(String imageUrl) async {
     final filenameWithExt = imageUrl.split('/').last;
     final filename = filenameWithExt.split('.').first;
     final parts = filename.split('_');
@@ -106,7 +140,7 @@ class _HomePageState extends State<HomePage> {
       _receivedImages.insert(0, imageUrl);
       _receivedFilenames.insert(0, label);
     });
-    _saveImagesToStorage();
+    await _saveImagesToStorage();
   }
 
   Future<void> _saveImagesToStorage() async {
@@ -273,7 +307,7 @@ class _HomePageState extends State<HomePage> {
                       backgroundColor: isActive ? Colors.green : Colors.red,
                       padding: EdgeInsets.zero,
                       shape: RoundedRectangleBorder(
-                                                borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
                     onPressed: () {
