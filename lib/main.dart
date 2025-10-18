@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:photo_view/photo_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:image_downloader/image_downloader.dart';
+import 'package:gallery_saver/gallery_saver.dart';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
@@ -178,6 +178,15 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<void> _saveImageToGallery(String imageUrl) async {
+    var status = await Permission.storage.request();
+    if (!status.isGranted) return;
+    final success = await GallerySaver.saveImage(imageUrl);
+    if (success == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ تصویر ذخیره شد')));
+    }
+  }
+
   void _showImageFullScreen(String imageUrl) {
     Navigator.push(
       context,
@@ -198,14 +207,7 @@ class _HomePageState extends State<HomePage> {
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     ElevatedButton.icon(
-                      onPressed: () async {
-                        var status = await Permission.storage.request();
-                        if (!status.isGranted) return;
-                        await ImageDownloader.downloadImage(imageUrl);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ تصویر ذخیره شد')));
-                        }
-                      },
+                      onPressed: () => _saveImageToGallery(imageUrl),
                       icon: const Icon(Icons.download),
                       label: const Text('ذخیره'),
                     ),
@@ -263,70 +265,3 @@ class _HomePageState extends State<HomePage> {
                       if (isActive) {
                         _unsubscribe(symbol, tf);
                       } else {
-                        _subscribe(symbol, tf);
-                      }
-                    },
-                    child: Text(tf, style: const TextStyle(fontSize: 12)),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      );
-    }).toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('مدیریت سیگنال چارت')),
-      body: Column(
-        children: [
-          Expanded(child: ListView(children: buildSymbolTiles())),
-                    const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(8.0),
-            child: Text('📸 تصاویر دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _receivedImages.length,
-              itemBuilder: (context, index) {
-                final url = _receivedImages[index];
-                final meta = _receivedFilenames[index];
-                final parts = meta.split('|');
-                final symbol = parts.length > 0 ? parts[0] : '';
-                final timeframe = parts.length > 1 ? parts[1] : '';
-
-                return GestureDetector(
-                  onTap: () => _showImageFullScreen(url),
-                  child: Card(
-                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Image.network(url),
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('چارت دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text('📈 نماد: $symbol', style: const TextStyle(fontSize: 12)),
-                              Text('⏱ تایم‌فریم: $timeframe', style: const TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
