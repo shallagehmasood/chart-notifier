@@ -24,7 +24,6 @@ final List<String> timeframes = [
   'H2', 'H3', 'H4', 'H6', 'H8', 'H12', 'D1', 'W1',
 ];
 
-/// 🧩 هندلر مخصوص وقتی اپ کاملاً بسته است (Terminated)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 
@@ -87,15 +86,14 @@ class _HomePageState extends State<HomePage> {
     _initApp();
   }
 
-  /// 🌟 مرحله‌ی اصلی راه‌اندازی
   Future<void> _initApp() async {
     await _loadImagesFromStorage();
     await _initUserId();
     await _initFirebase();
     await _handleNotificationClick();
+    await _loadImagesFromServer(); // 🆕 دریافت تمام تصاویر از سرور
   }
 
-  /// 🆕 تولید شناسه منحصربه‌فرد برای هر نصب
   Future<void> _initUserId() async {
     final prefs = await SharedPreferences.getInstance();
     String? savedId = prefs.getString('user_id');
@@ -109,7 +107,6 @@ class _HomePageState extends State<HomePage> {
     debugPrint('🧩 User ID: $_userId');
   }
 
-  /// 🚀 تنظیم Firebase و Listenerها
   Future<void> _initFirebase() async {
     _fcmToken = await FirebaseMessaging.instance.getToken();
     if (_fcmToken != null) {
@@ -117,7 +114,6 @@ class _HomePageState extends State<HomePage> {
       await _loadSubscriptions();
     }
 
-    // اپ باز است (Foreground)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
@@ -126,28 +122,21 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// 🔔 وقتی اپ از نوتیف باز می‌شود (بک‌گراند یا بسته)
   Future<void> _handleNotificationClick() async {
-    // اگر اپ از حالت بسته باز شده باشد
     RemoteMessage? initialMessage =
         await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage?.data['image_url'] != null) {
       _handleIncomingImage(initialMessage!.data['image_url']!);
     }
 
-    // اگر در بک‌گراند بوده
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) {
         _handleIncomingImage(imageUrl);
       }
     });
-
-    // همیشه بعد از باز شدن اپ، لیست تصاویر را بخوان
-    await _loadImagesFromStorage();
   }
 
-  /// 📥 ذخیره تصویر جدید
   void _handleIncomingImage(String imageUrl) async {
     final filenameWithExt = imageUrl.split('/').last;
     final filename = filenameWithExt.split('.').first;
@@ -163,14 +152,12 @@ class _HomePageState extends State<HomePage> {
     await _saveImagesToStorage();
   }
 
-  /// 💾 ذخیره لیست در حافظه
   Future<void> _saveImagesToStorage() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('images', _receivedImages);
     await prefs.setStringList('filenames', _receivedFilenames);
   }
 
-  /// 📂 خواندن تصاویر ذخیره‌شده
   Future<void> _loadImagesFromStorage() async {
     final prefs = await SharedPreferences.getInstance();
     final images = prefs.getStringList('images') ?? [];
@@ -181,7 +168,27 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// 📡 ثبت کاربر در سرور
+  Future<void> _loadImagesFromServer() async {
+    final response = await http.post(
+      Uri.parse('$SERVER_URL/images_for_user'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': _userId}),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final List images = data['images'];
+      setState(() {
+        _receivedImages =
+            images.map((e) => e['image_url'] as String).toList();
+        _receivedFilenames = images
+            .map((e) => '${e['symbol']}|${e['timeframe']}')
+            .toList();
+      });
+      await _saveImagesToStorage();
+    }
+  }
+
   Future<void> _registerOnServer(String token) async {
     await http.post(
       Uri.parse('$SERVER_URL/register'),
@@ -190,7 +197,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 🧾 گرفتن اشتراک‌های کاربر از سرور
   Future<void> _loadSubscriptions() async {
     final response = await http.post(
       Uri.parse('$SERVER_URL/subscriptions'),
@@ -233,7 +239,6 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// 📸 ذخیره تصویر در حافظه گوشی
   Future<void> _saveImageToGallery(String imageUrl) async {
     var status = await Permission.storage.request();
     if (!status.isGranted) return;
@@ -261,7 +266,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// 🖼 نمایش تمام‌صفحه تصویر
   void _showImageFullScreen(String imageUrl) {
     Navigator.push(
       context,
@@ -312,7 +316,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// ساخت لیست نمادها و تایم‌فریم‌ها
   List<Widget> buildSymbolTiles() {
     return symbols.map((symbol) {
       return ExpansionTile(
