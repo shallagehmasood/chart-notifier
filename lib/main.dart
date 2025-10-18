@@ -8,6 +8,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
+import 'dart:async';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
@@ -26,7 +27,6 @@ final List<String> timeframes = [
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-
   final imageUrl = message.data['image_url'];
   if (imageUrl != null) {
     final prefs = await SharedPreferences.getInstance();
@@ -52,21 +52,64 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-  runApp(const MyApp());
+
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: SplashScreen(),
+  ));
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+// ---------- SplashScreen ----------
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(_controller);
+    _controller.forward();
+
+    Timer(const Duration(seconds: 3), () {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomePage()),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Chart Notifier',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: const HomePage(),
+    return Scaffold(
+      body: FadeTransition(
+        opacity: _animation,
+        child: Center(
+          child: Image.asset('assets/icon.jpg', width: 150, height: 150),
+        ),
+      ),
     );
   }
 }
 
+// ---------- HomePage ----------
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -91,7 +134,7 @@ class _HomePageState extends State<HomePage> {
     await _initUserId();
     await _initFirebase();
     await _handleNotificationClick();
-    await _loadImagesFromServer(); // 🆕 دریافت تمام تصاویر از سرور
+    await _loadImagesFromServer();
   }
 
   Future<void> _initUserId() async {
@@ -101,9 +144,7 @@ class _HomePageState extends State<HomePage> {
       savedId = 'user_${DateTime.now().millisecondsSinceEpoch}_${UniqueKey()}';
       await prefs.setString('user_id', savedId);
     }
-    setState(() {
-      _userId = savedId!;
-    });
+    setState(() => _userId = savedId!);
     debugPrint('🧩 User ID: $_userId');
   }
 
@@ -116,9 +157,7 @@ class _HomePageState extends State<HomePage> {
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
-      if (imageUrl != null) {
-        _handleIncomingImage(imageUrl);
-      }
+      if (imageUrl != null) _handleIncomingImage(imageUrl);
     });
   }
 
@@ -126,14 +165,11 @@ class _HomePageState extends State<HomePage> {
     RemoteMessage? initialMessage =
         await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage?.data['image_url'] != null) {
-      _handleIncomingImage(initialMessage!.data['image_url']!);
+      await _loadImagesFromServer();
     }
 
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      final imageUrl = message.data['image_url'];
-      if (imageUrl != null) {
-        _handleIncomingImage(imageUrl);
-      }
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
+      await _loadImagesFromServer();
     });
   }
 
@@ -179,11 +215,9 @@ class _HomePageState extends State<HomePage> {
       final data = jsonDecode(response.body);
       final List images = data['images'];
       setState(() {
-        _receivedImages =
-            images.map((e) => e['image_url'] as String).toList();
-        _receivedFilenames = images
-            .map((e) => '${e['symbol']}|${e['timeframe']}')
-            .toList();
+        _receivedImages = images.map((e) => e['image_url'] as String).toList();
+        _receivedFilenames =
+            images.map((e) => '${e['symbol']}|${e['timeframe']}').toList();
       });
       await _saveImagesToStorage();
     }
@@ -239,6 +273,7 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  // ادامه مدیریت تصویر و حذف
   Future<void> _saveImageToGallery(String imageUrl) async {
     var status = await Permission.storage.request();
     if (!status.isGranted) return;
@@ -291,7 +326,7 @@ class _HomePageState extends State<HomePage> {
                       label: const Text('ذخیره'),
                     ),
                     ElevatedButton.icon(
-                      onPressed: () {
+                      onPressed: () async {
                         setState(() {
                           final index = _receivedImages.indexOf(imageUrl);
                           if (index != -1) {
@@ -299,7 +334,18 @@ class _HomePageState extends State<HomePage> {
                             _receivedFilenames.removeAt(index);
                           }
                         });
-                        _saveImagesToStorage();
+                        await _saveImagesToStorage();
+
+                        try {
+                          await http.post(
+                            Uri.parse('$SERVER_URL/delete_image'),
+                            headers: {'Content-Type': 'application/json'},
+                            body: jsonEncode({'user_id': _userId, 'image_url': imageUrl}),
+                          );
+                        } catch (e) {
+                          debugPrint('❌ خطا در حذف تصویر از سرور: $e');
+                        }
+
                         Navigator.pop(context);
                       },
                       icon: const Icon(Icons.delete),
@@ -377,7 +423,7 @@ class _HomePageState extends State<HomePage> {
                 final url = _receivedImages[index];
                 final meta = _receivedFilenames[index];
                 final parts = meta.split('|');
-                final symbol = parts.isNotEmpty ? parts[0] : '';
+                final symbol = parts.length > 0 ? parts[0] : '';
                 final timeframe = parts.length > 1 ? parts[1] : '';
 
                 return GestureDetector(
