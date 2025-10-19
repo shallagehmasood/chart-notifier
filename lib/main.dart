@@ -13,16 +13,44 @@ import 'dart:async';
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
 final List<String> symbols = [
-  'EURUSD', 'XAUUSD', 'GBPUSD', 'USDJPY', 'USDCHF',
-  'AUDUSD', 'AUDJPY', 'CADJPY', 'EURJPY',
-  'BTCUSD', 'ETHUSD', 'ADAUSD',
-  'DowJones', 'NASDAQ', 'S&P500',
+  'EURUSD',
+  'XAUUSD',
+  'GBPUSD',
+  'USDJPY',
+  'USDCHF',
+  'AUDUSD',
+  'AUDJPY',
+  'CADJPY',
+  'EURJPY',
+  'BTCUSD',
+  'ETHUSD',
+  'ADAUSD',
+  'DowJones',
+  'NASDAQ',
+  'S&P500',
 ];
 
 final List<String> timeframes = [
-  'M1', 'M2', 'M3', 'M4', 'M5', 'M6',
-  'M10', 'M12', 'M15', 'M20', 'M30', 'H1',
-  'H2', 'H3', 'H4', 'H6', 'H8', 'H12', 'D1', 'W1',
+  'M1',
+  'M2',
+  'M3',
+  'M4',
+  'M5',
+  'M6',
+  'M10',
+  'M12',
+  'M15',
+  'M20',
+  'M30',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H6',
+  'H8',
+  'H12',
+  'D1',
+  'W1',
 ];
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -38,11 +66,15 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-    final label = '$symbol|$timeframe';
+
+    final now = DateTime.now();
+    final formattedTime =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final label = '$symbol|$timeframe|$formattedTime';
 
     images.insert(0, imageUrl);
     filenames.insert(0, label);
-
     await prefs.setStringList('images', images);
     await prefs.setStringList('filenames', filenames);
   }
@@ -52,7 +84,6 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
   runApp(const MaterialApp(
     debugShowCheckedModeBanner: false,
     home: SplashScreen(),
@@ -67,21 +98,20 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
 
   @override
   void initState() {
     super.initState();
-
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
     );
     _animation = Tween<double>(begin: 0.0, end: 1.0).animate(_controller);
     _controller.forward();
-
     Timer(const Duration(seconds: 3), () {
       Navigator.pushReplacement(
         context,
@@ -112,6 +142,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 // ---------- HomePage ----------
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -145,7 +176,7 @@ class _HomePageState extends State<HomePage> {
       await prefs.setString('user_id', savedId);
     }
     setState(() => _userId = savedId!);
-    debugPrint('🧩 User ID: $_userId');
+    debugPrint('✅ User ID: $_userId');
   }
 
   Future<void> _initFirebase() async {
@@ -154,7 +185,6 @@ class _HomePageState extends State<HomePage> {
       await _registerOnServer(_fcmToken!);
       await _loadSubscriptions();
     }
-
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
       if (imageUrl != null) _handleIncomingImage(imageUrl);
@@ -167,7 +197,6 @@ class _HomePageState extends State<HomePage> {
     if (initialMessage?.data['image_url'] != null) {
       await _loadImagesFromServer();
     }
-
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
       await _loadImagesFromServer();
     });
@@ -179,7 +208,12 @@ class _HomePageState extends State<HomePage> {
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-    final label = '$symbol|$timeframe';
+
+    final now = DateTime.now();
+    final formattedTime =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final label = '$symbol|$timeframe|$formattedTime';
 
     setState(() {
       _receivedImages.insert(0, imageUrl);
@@ -210,14 +244,14 @@ class _HomePageState extends State<HomePage> {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'user_id': _userId}),
     );
-
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
       final List images = data['images'];
       setState(() {
-        _receivedImages = images.map((e) => e['image_url'] as String).toList();
+        _receivedImages =
+            images.map((e) => e['image_url'] as String).toList();
         _receivedFilenames =
-            images.map((e) => '${e['symbol']}|${e['timeframe']}').toList();
+            images.map((e) => '${e['symbol']}|${e['timeframe']}|${e['timestamp'] ?? ''}').toList();
       });
       await _saveImagesToStorage();
     }
@@ -273,182 +307,80 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // ادامه مدیریت تصویر و حذف
-  Future<void> _saveImageToGallery(String imageUrl) async {
-    var status = await Permission.storage.request();
-    if (!status.isGranted) return;
-
-    try {
-      final response = await http.get(Uri.parse(imageUrl));
-      if (response.statusCode == 200) {
-        final bytes = response.bodyBytes;
-        final directory = await getExternalStorageDirectory();
-        final path = '${directory!.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final file = File(path);
-        await file.writeAsBytes(bytes);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('✅ تصویر ذخیره شد: ${file.path}')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ خطا در ذخیره تصویر: $e')),
-        );
-      }
-    }
-  }
-
-  void _showImageFullScreen(String imageUrl) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          appBar: AppBar(title: const Text('نمایش تصویر')),
-          body: Stack(
-            children: [
-              PhotoView(
-                imageProvider: NetworkImage(imageUrl),
-                backgroundDecoration: const BoxDecoration(color: Colors.black),
-              ),
-              Positioned(
-                bottom: 20,
-                left: 20,
-                right: 20,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _saveImageToGallery(imageUrl),
-                      icon: const Icon(Icons.download),
-                      label: const Text('ذخیره'),
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        setState(() {
-                          final index = _receivedImages.indexOf(imageUrl);
-                          if (index != -1) {
-                            _receivedImages.removeAt(index);
-                            _receivedFilenames.removeAt(index);
-                          }
-                        });
-                        await _saveImagesToStorage();
-
-                        try {
-                          await http.post(
-                            Uri.parse('$SERVER_URL/delete_image'),
-                            headers: {'Content-Type': 'application/json'},
-                            body: jsonEncode({'user_id': _userId, 'image_url': imageUrl}),
-                          );
-                        } catch (e) {
-                          debugPrint('❌ خطا در حذف تصویر از سرور: $e');
-                        }
-
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.delete),
-                      label: const Text('حذف'),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                    ),
-                  ],
+  void _showTimeframeSelector(String symbol) {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) {
+        return GridView.count(
+          crossAxisCount: 4,
+          shrinkWrap: true,
+          children: timeframes.map((tf) {
+            final isActive = subscribed[symbol]?.contains(tf) ?? false;
+            return Padding(
+              padding: const EdgeInsets.all(4.0),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isActive ? Colors.green : Colors.red,
                 ),
+                onPressed: () {
+                  if (isActive) {
+                    _unsubscribe(symbol, tf);
+                  } else {
+                    _subscribe(symbol, tf);
+                  }
+                  Navigator.pop(context);
+                },
+                child: Text(tf),
               ),
-            ],
-          ),
-        ),
-      ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
-List<Widget> buildSymbolTiles() {
-  return symbols.map((symbol) {
-    final activeTimeframes = subscribed[symbol] ?? {};
-    String? selectedTimeframe = activeTimeframes.isNotEmpty
-        ? activeTimeframes.first // یا می‌توانید آخرین انتخاب را ذخیره کنید
-        : null;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: ExpansionTile(
-        title: Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold)),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'تایم‌فریم را انتخاب کنید:',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 8),
-                DropdownButton<String>(
-                  value: selectedTimeframe,
-                  hint: const Text('تایم‌فریمی را انتخاب کنید'),
-                  isExpanded: true,
-                  icon: const Icon(Icons.arrow_drop_down),
-                  style: const TextStyle(
-                    fontSize: 18, // ✅ فونت بزرگ‌تر
-                    fontWeight: FontWeight.bold, // ✅ فونت ضخیم‌تر
-                  ),
-                  dropdownColor: Colors.white,
-                  underline: Container(height: 1, color: Colors.grey),
-                  items: timeframes.map((String tf) {
-                    return DropdownMenuItem<String>(
-                      value: tf,
-                      child: Text(
-                        tf,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    if (newValue == null) return;
-
-                    final isActive = activeTimeframes.contains(newValue);
-                    if (isActive) {
-                      _unsubscribe(symbol, newValue);
-                    } else {
-                      _subscribe(symbol, newValue);
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                if (activeTimeframes.isNotEmpty)
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: activeTimeframes.map((tf) {
-                      return Chip(
-                        label: Text(tf),
-                        backgroundColor: Colors.green[200],
-                      );
-                    }).toList(),
-                  ),
-              ],
+  Widget buildSymbolGrid() {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3, // سه ستون
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 2.5,
+      ),
+      itemCount: symbols.length,
+      itemBuilder: (context, index) {
+        final symbol = symbols[index];
+        return ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.all(8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
-        ],
-      ),
+          onPressed: () => _showTimeframeSelector(symbol),
+          child: Text(symbol,
+              textAlign: TextAlign.center,
+              style:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+        );
+      },
     );
-  }).toList();
-}
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('مدیریت سیگنال چارت')),
+      appBar: AppBar(title: const Text('اعلان چارت‌ها')),
       body: Column(
         children: [
-          Expanded(child: ListView(children: buildSymbolTiles())),
+          Expanded(child: buildSymbolGrid()),
           const Divider(),
           const Padding(
             padding: EdgeInsets.all(8.0),
-            child: Text('📸 تصاویر دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: Text('تصاویر دریافت‌شده',
+                style: TextStyle(fontWeight: FontWeight.bold)),
           ),
           Expanded(
             child: ListView.builder(
@@ -457,13 +389,15 @@ List<Widget> buildSymbolTiles() {
                 final url = _receivedImages[index];
                 final meta = _receivedFilenames[index];
                 final parts = meta.split('|');
-                final symbol = parts.length > 0 ? parts[0] : '';
+                final symbol = parts.isNotEmpty ? parts[0] : '';
                 final timeframe = parts.length > 1 ? parts[1] : '';
+                final datetime = parts.length > 2 ? parts[2] : '';
 
                 return GestureDetector(
                   onTap: () => _showImageFullScreen(url),
                   child: Card(
-                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    margin:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -473,9 +407,15 @@ List<Widget> buildSymbolTiles() {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('چارت دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text('📈 نماد: $symbol', style: const TextStyle(fontSize: 12)),
-                              Text('⏱ تایم‌فریم: $timeframe', style: const TextStyle(fontSize: 12)),
+                              const Text('اطلاعات تصویر',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
+                              Text('جفت ارز: $symbol',
+                                  style: const TextStyle(fontSize: 12)),
+                              Text('تایم‌فریم: $timeframe',
+                                  style: const TextStyle(fontSize: 12)),
+                              Text('زمان: $datetime',
+                                  style: const TextStyle(fontSize: 12)),
                             ],
                           ),
                         ),
@@ -487,6 +427,22 @@ List<Widget> buildSymbolTiles() {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showImageFullScreen(String imageUrl) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('نمایش تصویر')),
+          body: PhotoView(
+            imageProvider: NetworkImage(imageUrl),
+            backgroundDecoration:
+                const BoxDecoration(color: Colors.black),
+          ),
+        ),
       ),
     );
   }
