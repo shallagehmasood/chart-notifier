@@ -69,7 +69,7 @@ class _IntroPageState extends State<IntroPage> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.asset('assets/intro.mp4')
+    _controller = VideoPlayerController.asset('assets/a.mp4')
       ..initialize().then((_) {
         setState(() {});
         _controller.play();
