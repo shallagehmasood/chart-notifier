@@ -13,44 +13,14 @@ import 'dart:async';
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
 final List<String> symbols = [
-  'EURUSD',
-  'XAUUSD',
-  'GBPUSD',
-  'USDJPY',
-  'USDCHF',
-  'AUDUSD',
-  'AUDJPY',
-  'CADJPY',
-  'EURJPY',
-  'BTCUSD',
-  'ETHUSD',
-  'ADAUSD',
-  'DowJones',
-  'NASDAQ',
-  'S&P500',
+  'EURUSD','XAUUSD','GBPUSD','USDJPY','USDCHF',
+  'AUDUSD','AUDJPY','CADJPY','EURJPY','BTCUSD',
+  'ETHUSD','ADAUSD','DowJones','NASDAQ','S&P500',
 ];
 
 final List<String> timeframes = [
-  'M1',
-  'M2',
-  'M3',
-  'M4',
-  'M5',
-  'M6',
-  'M10',
-  'M12',
-  'M15',
-  'M20',
-  'M30',
-  'H1',
-  'H2',
-  'H3',
-  'H4',
-  'H6',
-  'H8',
-  'H12',
-  'D1',
-  'W1',
+  'M1','M2','M3','M4','M5','M6','M10','M12','M15','M20',
+  'M30','H1','H2','H3','H4','H6','H8','H12','D1','W1',
 ];
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -60,19 +30,12 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final prefs = await SharedPreferences.getInstance();
     final images = prefs.getStringList('images') ?? [];
     final filenames = prefs.getStringList('filenames') ?? [];
-
     final filenameWithExt = imageUrl.split('/').last;
     final filename = filenameWithExt.split('.').first;
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-
-    final now = DateTime.now();
-    final formattedTime =
-        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final label = '$symbol|$timeframe|$formattedTime';
-
+    final label = '$symbol|$timeframe';
     images.insert(0, imageUrl);
     filenames.insert(0, label);
     await prefs.setStringList('images', images);
@@ -93,7 +56,6 @@ void main() async {
 // ---------- SplashScreen ----------
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
@@ -142,7 +104,6 @@ class _SplashScreenState extends State<SplashScreen>
 // ---------- HomePage ----------
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
-
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -176,7 +137,6 @@ class _HomePageState extends State<HomePage> {
       await prefs.setString('user_id', savedId);
     }
     setState(() => _userId = savedId!);
-    debugPrint('✅ User ID: $_userId');
   }
 
   Future<void> _initFirebase() async {
@@ -208,13 +168,7 @@ class _HomePageState extends State<HomePage> {
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-
-    final now = DateTime.now();
-    final formattedTime =
-        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-    final label = '$symbol|$timeframe|$formattedTime';
-
+    final label = '$symbol|$timeframe';
     setState(() {
       _receivedImages.insert(0, imageUrl);
       _receivedFilenames.insert(0, label);
@@ -248,10 +202,8 @@ class _HomePageState extends State<HomePage> {
       final data = jsonDecode(response.body);
       final List images = data['images'];
       setState(() {
-        _receivedImages =
-            images.map((e) => e['image_url'] as String).toList();
-        _receivedFilenames =
-            images.map((e) => '${e['symbol']}|${e['timeframe']}|${e['timestamp'] ?? ''}').toList();
+        _receivedImages = images.map((e) => e['image_url'] as String).toList();
+        _receivedFilenames = images.map((e) => '${e['symbol']}|${e['timeframe']}').toList();
       });
       await _saveImagesToStorage();
     }
@@ -310,30 +262,53 @@ class _HomePageState extends State<HomePage> {
   void _showTimeframeSelector(String symbol) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (_) {
-        return GridView.count(
-          crossAxisCount: 4,
-          shrinkWrap: true,
-          children: timeframes.map((tf) {
-            final isActive = subscribed[symbol]?.contains(tf) ?? false;
-            return Padding(
-              padding: const EdgeInsets.all(4.0),
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isActive ? Colors.green : Colors.red,
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                    symbol,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                 ),
-                onPressed: () {
-                  if (isActive) {
-                    _unsubscribe(symbol, tf);
-                  } else {
-                    _subscribe(symbol, tf);
-                  }
-                  Navigator.pop(context);
-                },
-                child: Text(tf),
-              ),
+                GridView.count(
+                  crossAxisCount: 5,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: timeframes.map((tf) {
+                    final isActive = subscribed[symbol]?.contains(tf) ?? false;
+                    return Padding(
+                      padding: const EdgeInsets.all(4.0),
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          shape: const CircleBorder(),
+                          padding: EdgeInsets.zero,
+                          backgroundColor: isActive ? Colors.green : Colors.red,
+                        ),
+                        onPressed: () {
+                          if (isActive) {
+                            _unsubscribe(symbol, tf);
+                          } else {
+                            _subscribe(symbol, tf);
+                          }
+                          setStateModal(() {}); // برای تغییر رنگ در لحظه
+                        },
+                        child: Text(
+                          tf,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
             );
-          }).toList(),
+          },
         );
       },
     );
@@ -362,8 +337,7 @@ class _HomePageState extends State<HomePage> {
           onPressed: () => _showTimeframeSelector(symbol),
           child: Text(symbol,
               textAlign: TextAlign.center,
-              style:
-                  const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
         );
       },
     );
@@ -391,13 +365,10 @@ class _HomePageState extends State<HomePage> {
                 final parts = meta.split('|');
                 final symbol = parts.isNotEmpty ? parts[0] : '';
                 final timeframe = parts.length > 1 ? parts[1] : '';
-                final datetime = parts.length > 2 ? parts[2] : '';
-
                 return GestureDetector(
                   onTap: () => _showImageFullScreen(url),
                   child: Card(
-                    margin:
-                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -408,16 +379,62 @@ class _HomePageState extends State<HomePage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text('اطلاعات تصویر',
-                                  style:
-                                      TextStyle(fontWeight: FontWeight.bold)),
-                              Text('جفت ارز: $symbol',
-                                  style: const TextStyle(fontSize: 12)),
-                              Text('تایم‌فریم: $timeframe',
-                                  style: const TextStyle(fontSize: 12)),
-                              Text('زمان: $datetime',
-                                  style: const TextStyle(fontSize: 12)),
+                                  style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text('جفت ارز: $symbol', style: const TextStyle(fontSize: 12)),
+                              Text('تایم‌فریم: $timeframe', style: const TextStyle(fontSize: 12)),
                             ],
                           ),
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                var status = await Permission.storage.request();
+                                if (!status.isGranted) return;
+                                try {
+                                  final response = await http.get(Uri.parse(url));
+                                  if (response.statusCode == 200) {
+                                    final bytes = response.bodyBytes;
+                                    final directory = await getExternalStorageDirectory();
+                                    final path = '${directory!.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+                                    final file = File(path);
+                                    await file.writeAsBytes(bytes);
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('ذخیره شد: ${file.path}')),
+                                      );
+                                    }
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('خطا در ذخیره: $e')),
+                                    );
+                                  }
+                                }
+                              },
+                              icon: const Icon(Icons.download),
+                              label: const Text('ذخیره'),
+                            ),
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                setState(() {
+                                  _receivedImages.removeAt(index);
+                                  _receivedFilenames.removeAt(index);
+                                });
+                                await _saveImagesToStorage();
+                                await http.post(
+                                  Uri.parse('$SERVER_URL/delete_image'),
+                                  headers: {'Content-Type': 'application/json'},
+                                  body: jsonEncode({'user_id': _userId, 'image_url': url}),
+                                );
+                              },
+                              icon: const Icon(Icons.delete),
+                              label: const Text('حذف'),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -439,8 +456,7 @@ class _HomePageState extends State<HomePage> {
           appBar: AppBar(title: const Text('نمایش تصویر')),
           body: PhotoView(
             imageProvider: NetworkImage(imageUrl),
-            backgroundDecoration:
-                const BoxDecoration(color: Colors.black),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
           ),
         ),
       ),
