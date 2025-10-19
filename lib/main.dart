@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -8,7 +9,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-import 'dart:async';
+import 'package:video_player/video_player.dart';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
@@ -35,7 +36,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-    final label = '$symbol|$timeframe';
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final label = '$symbol|$timeframe|$timestamp';
     images.insert(0, imageUrl);
     filenames.insert(0, label);
     await prefs.setStringList('images', images);
@@ -47,39 +49,48 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   runApp(const MaterialApp(
     debugShowCheckedModeBanner: false,
-    home: SplashScreen(),
+    home: IntroPage(), // ابتدا پخش ویدیو
   ));
 }
 
-// ---------- SplashScreen ----------
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+// ---------- IntroPage (Video Intro) ----------
+class IntroPage extends StatefulWidget {
+  const IntroPage({super.key});
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<IntroPage> createState() => _IntroPageState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+class _IntroPageState extends State<IntroPage> {
+  late VideoPlayerController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    );
-    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(_controller);
-    _controller.forward();
-    Timer(const Duration(seconds: 3), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomePage()),
-      );
+    _controller = VideoPlayerController.asset('assets/intro.mp4')
+      ..initialize().then((_) {
+        setState(() {});
+        _controller.play();
+      });
+
+    _controller.addListener(() {
+      if (_controller.value.position >= _controller.value.duration) {
+        _goToHome();
+      }
     });
+
+    Future.delayed(const Duration(seconds: 6), () {
+      if (mounted) _goToHome();
+    });
+  }
+
+  void _goToHome() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const HomePage()),
+    );
   }
 
   @override
@@ -91,11 +102,13 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FadeTransition(
-        opacity: _animation,
-        child: Center(
-          child: Image.asset('assets/icon.jpg', width: 150, height: 150),
-        ),
+      body: Center(
+        child: _controller.value.isInitialized
+            ? AspectRatio(
+                aspectRatio: _controller.value.aspectRatio,
+                child: VideoPlayer(_controller),
+              )
+            : const CircularProgressIndicator(),
       ),
     );
   }
@@ -168,7 +181,8 @@ class _HomePageState extends State<HomePage> {
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-    final label = '$symbol|$timeframe';
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final label = '$symbol|$timeframe|$timestamp';
     setState(() {
       _receivedImages.insert(0, imageUrl);
       _receivedFilenames.insert(0, label);
@@ -203,7 +217,10 @@ class _HomePageState extends State<HomePage> {
       final List images = data['images'];
       setState(() {
         _receivedImages = images.map((e) => e['image_url'] as String).toList();
-        _receivedFilenames = images.map((e) => '${e['symbol']}|${e['timeframe']}').toList();
+        _receivedFilenames = images
+            .map((e) =>
+                '${e['symbol']}|${e['timeframe']}|${DateTime.now().millisecondsSinceEpoch}')
+            .toList();
       });
       await _saveImagesToStorage();
     }
@@ -271,10 +288,7 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(8.0),
-                  child: Text(
-                    symbol,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
+                  child: Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 GridView.count(
                   crossAxisCount: 5,
@@ -296,12 +310,10 @@ class _HomePageState extends State<HomePage> {
                           } else {
                             _subscribe(symbol, tf);
                           }
-                          setStateModal(() {}); // برای تغییر رنگ در لحظه
+                          setStateModal(() {});
                         },
-                        child: Text(
-                          tf,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                        ),
+                        child: Text(tf,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       ),
                     );
                   }).toList(),
@@ -319,7 +331,7 @@ class _HomePageState extends State<HomePage> {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3, // سه ستون
+        crossAxisCount: 3,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
         childAspectRatio: 2.5,
@@ -328,15 +340,11 @@ class _HomePageState extends State<HomePage> {
       itemBuilder: (context, index) {
         final symbol = symbols[index];
         return ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.all(8),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
           onPressed: () => _showTimeframeSelector(symbol),
+          style: ElevatedButton.styleFrom(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
           child: Text(symbol,
-              textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
         );
       },
@@ -353,8 +361,8 @@ class _HomePageState extends State<HomePage> {
           const Divider(),
           const Padding(
             padding: EdgeInsets.all(8.0),
-            child: Text('تصاویر دریافت‌شده',
-                style: TextStyle(fontWeight: FontWeight.bold)),
+            child:
+                Text('تصاویر دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
           Expanded(
             child: ListView.builder(
@@ -365,10 +373,15 @@ class _HomePageState extends State<HomePage> {
                 final parts = meta.split('|');
                 final symbol = parts.isNotEmpty ? parts[0] : '';
                 final timeframe = parts.length > 1 ? parts[1] : '';
+                final timestamp = parts.length > 2
+                    ? DateTime.fromMillisecondsSinceEpoch(
+                        int.parse(parts[2])).toLocal().toString()
+                    : '';
                 return GestureDetector(
                   onTap: () => _showImageFullScreen(url),
                   child: Card(
-                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    margin:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -382,6 +395,7 @@ class _HomePageState extends State<HomePage> {
                                   style: TextStyle(fontWeight: FontWeight.bold)),
                               Text('جفت ارز: $symbol', style: const TextStyle(fontSize: 12)),
                               Text('تایم‌فریم: $timeframe', style: const TextStyle(fontSize: 12)),
+                              Text('زمان: $timestamp', style: const TextStyle(fontSize: 12)),
                             ],
                           ),
                         ),
@@ -396,8 +410,11 @@ class _HomePageState extends State<HomePage> {
                                   final response = await http.get(Uri.parse(url));
                                   if (response.statusCode == 200) {
                                     final bytes = response.bodyBytes;
-                                    final directory = await getExternalStorageDirectory();
-                                    final path = '${directory!.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+                                    final directory =
+                                        await getExternalStorageDirectory();
+                                    final filename =
+                                        '${symbol}_${timeframe}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                                    final path = '${directory!.path}/$filename';
                                     final file = File(path);
                                     await file.writeAsBytes(bytes);
                                     if (mounted) {
@@ -427,12 +444,14 @@ class _HomePageState extends State<HomePage> {
                                 await http.post(
                                   Uri.parse('$SERVER_URL/delete_image'),
                                   headers: {'Content-Type': 'application/json'},
-                                  body: jsonEncode({'user_id': _userId, 'image_url': url}),
+                                  body: jsonEncode(
+                                      {'user_id': _userId, 'image_url': url}),
                                 );
                               },
                               icon: const Icon(Icons.delete),
                               label: const Text('حذف'),
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red),
                             ),
                           ],
                         ),
@@ -456,7 +475,8 @@ class _HomePageState extends State<HomePage> {
           appBar: AppBar(title: const Text('نمایش تصویر')),
           body: PhotoView(
             imageProvider: NetworkImage(imageUrl),
-            backgroundDecoration: const BoxDecoration(color: Colors.black),
+            backgroundDecoration:
+                const BoxDecoration(color: Colors.black),
           ),
         ),
       ),
