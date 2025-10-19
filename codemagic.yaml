@@ -11,6 +11,10 @@ workflows:
           flutter pub upgrade --major-versions
           flutter pub get
 
+      - name: Generate launcher icons
+        script: |
+          flutter pub run flutter_launcher_icons:main
+
       - name: Build APK
         script: flutter build apk --release
 
