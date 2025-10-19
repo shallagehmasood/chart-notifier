@@ -26,11 +26,13 @@ dev_dependencies:
 flutter_icons:
   android: true
   ios: true
-  image_path: "assets/icon.png"  # مسیر فایل آیکن شما
-  remove_alpha_ios: true         # حذف شفافیت در iOS
-  adaptive_icon_background: "#ffffff"  # رنگ پس‌زمینه آیکن adaptive اندروید
+  image_path: "assets/icon.png"
+  remove_alpha_ios: true
+  adaptive_icon_background: "#ffffff"
 
 flutter:
   uses-material-design: true
+
   assets:
     - assets/icon.png
+    - assets/a.mp4
