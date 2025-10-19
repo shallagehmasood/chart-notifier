@@ -1,4 +1,3 @@
-
 workflows:
   build_apk:
     name: Build Flutter APK
@@ -6,9 +5,11 @@ workflows:
     environment:
       flutter: stable
     scripts:
-      - name: Install dependencies
-        script: flutter pub outdated
-
+      - name: Clean & upgrade dependencies
+        script: |
+          flutter clean
+          flutter pub upgrade --major-versions
+          flutter pub get
 
       - name: Build APK
         script: flutter build apk --release
