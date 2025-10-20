@@ -11,7 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
-const String SERVER_URL = 'http://178.63.171.244:5000';
+const String SERVER_URL = 'http://YOUR_SERVER_HOST:8000'; // ← این را تغییر بده
 
 final List<String> symbols = [
   'EURUSD','XAUUSD','GBPUSD','USDJPY','USDCHF',
@@ -107,13 +107,15 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _userId = '';
-  String userMode = '0000000'; // 7-bit string
-  Map<String, dynamic> symbolPrefs = {}; 
+  String _fcmToken = '';
+  String userMode = '0000000'; // رشته 7 بیتی محلی (کاربر)
+  Map<String, dynamic> symbolPrefs = {}; // نگهداری انتخابهای محلی: symbol -> { timeframes: [], direction: 'BUY' }
   List<Map<String, dynamic>> _receivedImages = [];
 
-  Map<String, Set<String>> _confirmedTfs = {};
-  Map<String, String> _confirmedDirection = {};
-  String _confirmedMode = '';
+  // نگهداری وضعیت "تأیید‌شده توسط سرور" برای تغییر رنگ دکمه‌ها
+  Map<String, Set<String>> _confirmedTfs = {}; // symbol -> set(timeframe)
+  Map<String, String> _confirmedDirection = {}; // symbol -> 'BUY'/'SELL'/'BUY&SELL'
+  String _confirmedMode = '0000000';
 
   @override
   void initState() {
@@ -121,24 +123,56 @@ class _HomePageState extends State<HomePage> {
     _initApp();
   }
 
+  // ---------- init ----------
   Future<void> _initApp() async {
+    await _initUserId();
+    await _loadLocalPrefs();
+    await _initFirebase();
+    await _fetchImagesFromServer();
+  }
+
+  Future<void> _initUserId() async {
     final prefs = await SharedPreferences.getInstance();
-    _userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
-    await prefs.setString('user_id', _userId);
-
-    userMode = prefs.getString('mode_7bit') ?? '0000000';
-    _confirmedMode = userMode;
-
-    final symJson = prefs.getString('symbol_prefs') ?? '{}';
-    symbolPrefs = jsonDecode(symJson);
-
-    for (var s in symbolPrefs.keys) {
-      _confirmedTfs[s] = Set<String>.from(symbolPrefs[s]['timeframes'] ?? []);
-      _confirmedDirection[s] = symbolPrefs[s]['direction'] ?? 'BUY&SELL';
+    String? saved = prefs.getString('user_id');
+    if (saved == null) {
+      saved = 'user_${DateTime.now().millisecondsSinceEpoch}';
+      await prefs.setString('user_id', saved);
     }
+    setState(() => _userId = saved!);
+  }
 
-    await _loadImagesFromServer();
-    setState(() {});
+  Future<void> _initFirebase() async {
+    _fcmToken = (await FirebaseMessaging.instance.getToken()) ?? '';
+    if (_fcmToken.isNotEmpty) {
+      try {
+        await http.post(Uri.parse('$SERVER_URL/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'user_id': _userId, 'fcm_token': _fcmToken}));
+      } catch (_) {}
+    }
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _fetchImagesFromServer();
+    });
+    FirebaseMessaging.onMessageOpenedApp.listen((_) {
+      _fetchImagesFromServer();
+    });
+  }
+
+  Future<void> _loadLocalPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('mode_7bit') ?? '0000000';
+    final symJson = prefs.getString('symbol_prefs') ?? '{}';
+    final Map<String, dynamic> s = jsonDecode(symJson);
+    setState(() {
+      userMode = mode;
+      _confirmedMode = mode;
+      symbolPrefs = s;
+      // initialize confirmed maps from saved prefs (we assume they were confirmed previously)
+      for (var sym in s.keys) {
+        _confirmedTfs[sym] = Set<String>.from(s[sym]['timeframes'] ?? []);
+        _confirmedDirection[sym] = s[sym]['direction'] ?? 'BUY&SELL';
+      }
+    });
   }
 
   Future<void> _saveLocalPrefs() async {
@@ -147,7 +181,8 @@ class _HomePageState extends State<HomePage> {
     await prefs.setString('symbol_prefs', jsonEncode(symbolPrefs));
   }
 
-  Future<void> _loadImagesFromServer() async {
+  // ---------- سرور: دریافت تصاویر ----------
+  Future<void> _fetchImagesFromServer() async {
     try {
       final rsp = await http.post(
         Uri.parse('$SERVER_URL/images_for_user'),
@@ -158,30 +193,31 @@ class _HomePageState extends State<HomePage> {
         final data = jsonDecode(rsp.body);
         final List imgs = data['images'] ?? [];
         setState(() {
-          _receivedImages = imgs.map((img) => {
-            'url': img['image_url'],
-            'symbol': img['symbol'],
-            'timeframe': img['timeframe'],
-            'filename': img['filename'] ?? img['image_url'].split('/').last,
-            'timestamp': img['timestamp'] != null
-                ? DateTime.fromMillisecondsSinceEpoch(img['timestamp']).toLocal()
-                : null,
+          // تبدیل به فرمت مورد استفاده در UI
+          _receivedImages = imgs.map<Map<String, dynamic>>((img) {
+            return {
+              'url': img['url'] ?? img['image_url'] ?? img['imageUrl'],
+              'symbol': img['symbol'],
+              'timeframe': img['timeframe'],
+              'code_8bit': img['code_8bit'],
+              'filename': img['filename'] ?? (img['image_url'] ?? '').split('/').last,
+              'timestamp': img['timestamp'] != null ? DateTime.tryParse(img['timestamp'].toString()) : null,
+            };
           }).toList();
         });
       }
-    } catch (e) {}
+    } catch (e) {
+      // ignore یا نمایش پیام در صورت نیاز
+    }
   }
 
-  // ---------- دانلود و حذف تصویر ----------
+  // ---------- دانلود تصویر ----------
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
     var status = await Permission.storage.request();
     if (!status.isGranted) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('دسترسی به حافظه رد شد')),
-      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('دسترسی حافظه نیاز است')));
       return;
     }
-
     try {
       final resp = await http.get(Uri.parse(url));
       if (resp.statusCode == 200) {
@@ -191,17 +227,16 @@ class _HomePageState extends State<HomePage> {
         final path = '${directory!.path}/$filename';
         final file = File(path);
         await file.writeAsBytes(bytes);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ذخیره شد: $path')),
-        );
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('ذخیره شد: $path')));
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خطا در دانلود')));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('خطا در دانلود: $e')),
-      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطا: $e')));
     }
   }
 
+  // ---------- حذف تصویر ----------
   Future<void> _deleteImageForUser(String url) async {
     try {
       final resp = await http.post(
@@ -213,16 +248,17 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _receivedImages.removeWhere((img) => img['url'] == url);
         });
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خطا در حذف تصویر')));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('خطا در حذف تصویر: $e')),
-      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطا: $e')));
     }
   }
 
-  // ---------- ارسال تنظیمات ----------
-  Future<void> _sendPreferenceToServer(String symbol) async {
+  // ---------- ارسال تنظیمات یک نماد به سرور ----------
+  // payload مطابق SavePreferencesModel سرور
+  Future<bool> _sendPreferenceToServer(String symbol) async {
     final payload = {
       'user_id': _userId,
       'mode': userMode,
@@ -234,73 +270,111 @@ class _HomePageState extends State<HomePage> {
         }
       ],
     };
+
     try {
-      final rsp = await http.post(Uri.parse('$SERVER_URL/save_preferences'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(payload));
+      final rsp = await http.post(
+        Uri.parse('$SERVER_URL/save_preferences'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
       if (rsp.statusCode == 200) {
+        // در صورت موفقیت: mark confirmed for that symbol
         setState(() {
           _confirmedTfs[symbol] = Set<String>.from(symbolPrefs[symbol]?['timeframes'] ?? []);
           _confirmedDirection[symbol] = symbolPrefs[symbol]?['direction'] ?? 'BUY&SELL';
         });
+        return true;
+      } else {
+        return false;
       }
-    } catch (e) {}
+    } catch (e) {
+      return false;
+    }
   }
 
-  Future<void> _sendModeToServer() async {
+  // ---------- ارسال مود به سرور ----------
+  Future<bool> _sendModeToServer() async {
+    final payload = {'user_id': _userId, 'mode': userMode};
     try {
-      final payload = {'user_id': _userId, 'mode': userMode};
-      final rsp = await http.post(Uri.parse('$SERVER_URL/save_preferences'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(payload));
-      if (rsp.statusCode == 200) setState(() => _confirmedMode = userMode);
-    } catch (e) {}
+      final rsp = await http.post(
+        Uri.parse('$SERVER_URL/save_preferences'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+      if (rsp.statusCode == 200) {
+        setState(() {
+          _confirmedMode = userMode;
+        });
+        return true;
+      } else {
+        return false;
+      }
+    } catch (e) {
+      return false;
+    }
   }
 
-  void _showImageFullScreen(String url, String filename){
-    Navigator.push(context, MaterialPageRoute(builder: (_){
+  // ---------- نمایش تمام‌صفحه تصویر ----------
+  void _showImageFullScreen(String imageUrl, String filename) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) {
       return Scaffold(
         appBar: AppBar(title: Text(filename)),
-        body: PhotoView(imageProvider: NetworkImage(url)),
+        body: PhotoView(imageProvider: NetworkImage(imageUrl)),
       );
     }));
   }
 
-  // ---------- ویجت مود ----------
+  // ---------- ویجت مود (7-bit) ----------
   Widget _buildModeWidget() {
-    final modeKeys = ['A1','B','C','D','E','F','G'];
-    Map<String,bool> modeMap = {};
-    final init = userMode.padRight(7,'0').substring(0,7);
-    for (int i=0;i<7;i++) modeMap[modeKeys[i]] = init[i]=='1';
+    final modeKeys = ['A','B','C','D','E','F','G']; // نمایشی برای کاربر
+    // map محلی برای ساخت رشته پس از تغییر
+    Map<int, bool> tmp = {};
+    final init = userMode.padRight(7, '0').substring(0, 7);
+    for (int i = 0; i < 7; i++) tmp[i] = init[i] == '1';
 
     return Card(
       margin: const EdgeInsets.all(8),
       child: Padding(
         padding: const EdgeInsets.all(8),
-        child: Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: modeKeys.map((k){
-            final isConfirmed = (_confirmedMode.length>=7 && _confirmedMode[modeKeys.indexOf(k)]=='1');
-            return ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: isConfirmed ? Colors.green : Colors.grey),
-              onPressed: (){
-                modeMap[k] = !(modeMap[k] ?? false);
-                final bits = modeKeys.map((mk)=> modeMap[mk]! ? '1':'0').toList();
-                userMode = bits.join();
-                _saveLocalPrefs();
-                _sendModeToServer();
-                setState(() {});
-              },
-              child: Text(k, style: const TextStyle(fontSize: 12)),
-            );
-          }).toList(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('مود (7-bit)', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: List.generate(7, (i) {
+                final isConfirmed = _confirmedMode.length >= 7 && _confirmedMode[i] == '1';
+                return ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isConfirmed ? Colors.green : Colors.grey,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  onPressed: () async {
+                    // toggle locally
+                    tmp[i] = !(tmp[i] ?? false);
+                    // rebuild userMode: رشته 7 بیتی
+                    final bits = List.generate(7, (j) => tmp[j]! ? '1' : '0');
+                    userMode = bits.join();
+                    await _saveLocalPrefs();
+                    // ارسال مود به سرور و در صورت موفق تغییر رنگ (confirmed)
+                    final ok = await _sendModeToServer();
+                    if (!ok && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خطا در ثبت مود در سرور')));
+                    }
+                  },
+                  child: Text(modeKeys[i], style: const TextStyle(fontSize: 12)),
+                );
+              }),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  // ---------- ویجت جفت‌ارزها ----------
+  // ---------- ویجت جفت‌ارزها (جمع‌وجور) ----------
   Widget _buildSymbolsWidget() {
     return Column(
       children: symbols.map((s) {
@@ -309,52 +383,82 @@ class _HomePageState extends State<HomePage> {
         final confirmedDir = _confirmedDirection[s] ?? 'BUY&SELL';
 
         return Card(
-          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
           child: Padding(
             padding: const EdgeInsets.all(8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(s, style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(child: Text(s, style: const TextStyle(fontWeight: FontWeight.bold))),
+                    // quick indicator if any tf confirmed
+                    if ((confirmedTfs.isNotEmpty || confirmedDir != 'BUY&SELL'))
+                      const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                // تایم‌فریم‌ها
                 Wrap(
                   spacing: 4,
                   runSpacing: 4,
-                  children: timeframes.map((tf){
+                  children: timeframes.map((tf) {
+                    final isSelected = (prefs['timeframes'] as List).contains(tf);
                     final isConfirmed = confirmedTfs.contains(tf);
                     return ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: isConfirmed ? Colors.green : Colors.grey, minimumSize: const Size(40,28), padding: const EdgeInsets.symmetric(horizontal:6, vertical:2)),
-                      onPressed: (){
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isConfirmed ? Colors.green : Colors.grey,
+                        minimumSize: const Size(40, 28),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      ),
+                      onPressed: () async {
+                        // تغییر محلی (تغییر وضعیت انتخاب شده ولی هنوز رنگ تغییر نمی‌کند تا سرور تایید کند)
                         final tfs = List<String>.from(prefs['timeframes']);
-                        if(tfs.contains(tf)) tfs.remove(tf); else tfs.add(tf);
+                        if (tfs.contains(tf)) {
+                          tfs.remove(tf);
+                        } else {
+                          tfs.add(tf);
+                        }
                         prefs['timeframes'] = tfs;
                         symbolPrefs[s] = prefs;
-                        _saveLocalPrefs();
-                        _sendPreferenceToServer(s);
-                        setState(() {});
+                        await _saveLocalPrefs();
+
+                        // ارسال به سرور و در صورت موفق set confirmed برای آن tf
+                        final ok = await _sendPreferenceToServer(s);
+                        if (!ok && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خطا در ثبت تایم‌فریم در سرور')));
+                        }
                       },
-                      child: Text(tf, style: const TextStyle(fontSize: 10)),
+                      child: Text(tf, style: const TextStyle(fontSize: 11)),
                     );
                   }).toList(),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
+                // جهت
                 Wrap(
-                  spacing: 4,
-                  children: ['BUY','SELL','BUY&SELL'].map((dir){
-                    final isConfirmed = confirmedDir==dir;
+                  spacing: 6,
+                  children: ['BUY', 'SELL', 'BUY&SELL'].map((dir) {
+                    final isSelected = prefs['direction'] == dir;
+                    final isConfirmed = confirmedDir == dir;
                     return ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: isConfirmed ? Colors.green : Colors.grey, padding: const EdgeInsets.symmetric(horizontal:8, vertical:4)),
-                      onPressed: (){
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isConfirmed ? Colors.green : Colors.grey,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      ),
+                      onPressed: () async {
                         prefs['direction'] = dir;
                         symbolPrefs[s] = prefs;
-                        _saveLocalPrefs();
-                        _sendPreferenceToServer(s);
-                        setState(() {});
+                        await _saveLocalPrefs();
+
+                        final ok = await _sendPreferenceToServer(s);
+                        if (!ok && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خطا در ثبت جهت در سرور')));
+                        }
                       },
-                      child: Text(dir, style: const TextStyle(fontSize:10)),
+                      child: Text(dir, style: const TextStyle(fontSize: 12)),
                     );
                   }).toList(),
-                )
+                ),
               ],
             ),
           ),
@@ -365,64 +469,76 @@ class _HomePageState extends State<HomePage> {
 
   // ---------- لیست تصاویر ----------
   Widget _buildImageList() {
-    return _receivedImages.isEmpty
-        ? const Center(child: Text('هیچ تصویری برای نمایش نیست'))
-        : ListView.builder(
-            itemCount: _receivedImages.length,
-            itemBuilder: (context,index){
-              final img = _receivedImages[index];
-              final tsText = img['timestamp'] != null ? img['timestamp'].toString() : '—';
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+    if (_receivedImages.isEmpty) {
+      return const Center(child: Text('هیچ تصویری برای نمایش نیست'));
+    }
+    return ListView.builder(
+      itemCount: _receivedImages.length,
+      itemBuilder: (context, index) {
+        final img = _receivedImages[index];
+        final tsText = img['timestamp'] != null ? img['timestamp'].toString() : '—';
+        final filename = img['filename'] ?? img['url'].split('/').last;
+        return Card(
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: () => _showImageFullScreen(img['url'], filename),
+                child: Image.network(img['url'], fit: BoxFit.cover),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
-                      onTap: ()=>_showImageFullScreen(img['url'], img['filename']),
-                      child: Image.network(img['url'], fit: BoxFit.cover),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("جفت ارز: ${img['symbol']}"),
-                          Text("تایم فریم: ${img['timeframe']}"),
-                          Text("زمان: $tsText"),
-                          Text("نام تصویر: ${img['filename']}", style: const TextStyle(color: Colors.grey)),
-                          const SizedBox(height:4),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              ElevatedButton.icon(
-                                onPressed: ()=>_downloadImage(img['url'], img['symbol'], img['timeframe']),
-                                icon: const Icon(Icons.download, size:16),
-                                label: const Text('دانلود', style: TextStyle(fontSize:12)),
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: ()=>_deleteImageForUser(img['url']),
-                                icon: const Icon(Icons.delete, size:16),
-                                label: const Text('حذف', style: TextStyle(fontSize:12)),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                              )
-                            ],
-                          )
-                        ],
-                      ),
+                    Text("جفت ارز: ${img['symbol']}"),
+                    Text("تایم فریم: ${img['timeframe']}"),
+                    Text("زمان: $tsText"),
+                    Text("کد ۸ بیتی: ${img['code_8bit']}", style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () => _downloadImage(img['url'], img['symbol'], img['timeframe']),
+                          icon: const Icon(Icons.download, size: 16),
+                          label: const Text('دانلود', style: TextStyle(fontSize: 12)),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: () => _deleteImageForUser(img['url']),
+                          icon: const Icon(Icons.delete, size: 16),
+                          label: const Text('حذف', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                        ),
+                      ],
                     )
                   ],
                 ),
-              );
-            },
-          );
+              )
+            ],
+          ),
+        );
+      },
+    );
   }
 
+  // ---------- build ----------
   @override
-  Widget build(BuildContext context){
+  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('داشبورد سیگنال‌ها')),
+      appBar: AppBar(
+        title: const Text('داشبورد سیگنال‌ها'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchImagesFromServer,
+          )
+        ],
+      ),
       body: Column(
         children: [
+          // نیمه بالایی: تنظیمات
           Expanded(
             flex: 2,
             child: SingleChildScrollView(
@@ -434,11 +550,14 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
-          const Divider(height:1),
+
+          const Divider(height: 1),
+
+          // نیمه پایینی: تصاویر
           Expanded(
-            flex:3,
+            flex: 3,
             child: _buildImageList(),
-          )
+          ),
         ],
       ),
     );
