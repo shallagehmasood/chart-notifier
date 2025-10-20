@@ -18,7 +18,8 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: stable
+          flutter-version: '3.13.9'
+          channel: 'stable'
 
       - name: Clean & upgrade dependencies
         run: |
@@ -45,10 +46,10 @@ jobs:
           server_port: 587
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "Flutter APK Build"
+          subject: "Flutter APK Build Completed"
           to: shallagehsaeed@gmail.com
           from: ${{ secrets.EMAIL_USERNAME }}
           body: |
             سلام masood جان،
             فایل APK پروژه‌ات با موفقیت ساخته شد 🎉
-            می‌تونی از GitHub Actions بخش artifacts دانلودش کنی.
+            می‌تونی از بخش Actions در GitHub و قسمت Artifacts دانلودش کنی.
