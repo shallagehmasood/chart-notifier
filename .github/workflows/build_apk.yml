@@ -39,17 +39,7 @@ jobs:
           name: app-release
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Send email with APK link
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "Flutter APK Build Completed"
-          to: shallagehsaeed@gmail.com
-          from: ${{ secrets.EMAIL_USERNAME }}
-          body: |
+
             سلام masood جان،
             فایل APK پروژه‌ات با موفقیت ساخته شد 🎉
             می‌تونی از بخش Actions در GitHub و قسمت Artifacts دانلودش کنی.
