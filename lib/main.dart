@@ -97,7 +97,8 @@ class _IntroPageState extends State<IntroPage> {
     );
   }
 }
-// ---------- HomePage بهینه و جمع و جور ----------
+
+// ---------- HomePage ----------
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -107,7 +108,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   String _userId = '';
   String userMode = '0000000'; // 7-bit string
-  Map<String, dynamic> symbolPrefs = {};
+  Map<String, dynamic> symbolPrefs = {}; 
   List<Map<String, dynamic>> _receivedImages = [];
 
   Map<String, Set<String>> _confirmedTfs = {};
@@ -171,7 +172,56 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {}
   }
 
-  // ---------- ارسال تغییرات به سرور ----------
+  // ---------- دانلود و حذف تصویر ----------
+  Future<void> _downloadImage(String url, String symbol, String timeframe) async {
+    var status = await Permission.storage.request();
+    if (!status.isGranted) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('دسترسی به حافظه رد شد')),
+      );
+      return;
+    }
+
+    try {
+      final resp = await http.get(Uri.parse(url));
+      if (resp.statusCode == 200) {
+        final bytes = resp.bodyBytes;
+        final directory = await getExternalStorageDirectory();
+        final filename = '${symbol}_${timeframe}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final path = '${directory!.path}/$filename';
+        final file = File(path);
+        await file.writeAsBytes(bytes);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('ذخیره شد: $path')),
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطا در دانلود: $e')),
+      );
+    }
+  }
+
+  Future<void> _deleteImageForUser(String url) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$SERVER_URL/delete_image'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'image_url': url}),
+      );
+      if (resp.statusCode == 200) {
+        setState(() {
+          _receivedImages.removeWhere((img) => img['url'] == url);
+        });
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطا در حذف تصویر: $e')),
+      );
+    }
+  }
+
+  // ---------- ارسال تنظیمات ----------
   Future<void> _sendPreferenceToServer(String symbol) async {
     final payload = {
       'user_id': _userId,
@@ -207,7 +257,16 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {}
   }
 
-  // ---------- UI نیمه بالا ----------
+  void _showImageFullScreen(String url, String filename){
+    Navigator.push(context, MaterialPageRoute(builder: (_){
+      return Scaffold(
+        appBar: AppBar(title: Text(filename)),
+        body: PhotoView(imageProvider: NetworkImage(url)),
+      );
+    }));
+  }
+
+  // ---------- ویجت مود ----------
   Widget _buildModeWidget() {
     final modeKeys = ['A1','B','C','D','E','F','G'];
     Map<String,bool> modeMap = {};
@@ -241,6 +300,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ---------- ویجت جفت‌ارزها ----------
   Widget _buildSymbolsWidget() {
     return Column(
       children: symbols.map((s) {
@@ -303,6 +363,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ---------- لیست تصاویر ----------
   Widget _buildImageList() {
     return _receivedImages.isEmpty
         ? const Center(child: Text('هیچ تصویری برای نمایش نیست'))
@@ -354,15 +415,6 @@ class _HomePageState extends State<HomePage> {
               );
             },
           );
-  }
-
-  void _showImageFullScreen(String url, String filename){
-    Navigator.push(context, MaterialPageRoute(builder: (_){
-      return Scaffold(
-        appBar: AppBar(title: Text(filename)),
-        body: PhotoView(imageProvider: NetworkImage(url)),
-      );
-    }));
   }
 
   @override
