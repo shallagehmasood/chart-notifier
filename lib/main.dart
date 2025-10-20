@@ -507,25 +507,56 @@ class ModeSettingsPage extends StatefulWidget {
 }
 
 class _ModeSettingsPageState extends State<ModeSettingsPage> {
-  late List<String> modeKeys;
   late Map<String, bool> modeMap;
+  final List<String> modeKeys = ['A1', 'A2', 'B', 'C', 'D', 'E', 'F', 'G'];
 
   @override
   void initState() {
     super.initState();
-    modeKeys = ['Reversal','R','S','FTR','CP','SR','Test'];
-    final bits = widget.initialMode.padRight(7, '0');
-    modeMap = {for (int i = 0; i < 7; i++) modeKeys[i]: bits[i] == '1'};
+    // initialMode length 7
+    final bits = widget.initialMode.padRight(7, '0').substring(0,7);
+    modeMap = {};
+    // A1/A2 logic: A1 = bits[0], A2 = !A1
+    modeMap['A1'] = bits[0] == '1';
+    modeMap['A2'] = !modeMap['A1']!;
+    // B..G
+    final otherKeys = ['B','C','D','E','F','G'];
+    for (int i = 0; i < otherKeys.length; i++) {
+      modeMap[otherKeys[i]] = bits.length > i+1 ? bits[i+1] == '1' : false;
+    }
+  }
+
+  // ساخت رشته ۷ بیتی برای ذخیره
+  String _build7BitString() {
+    final a1 = modeMap['A1']! ? '1' : '0';
+    final bits = [
+      a1,
+      modeMap['B']! ? '1' : '0',
+      modeMap['C']! ? '1' : '0',
+      modeMap['D']! ? '1' : '0',
+      modeMap['E']! ? '1' : '0',
+      modeMap['F']! ? '1' : '0',
+      modeMap['G']! ? '1' : '0',
+    ];
+    return bits.join();
   }
 
   void _toggleMode(String key) async {
-    modeMap[key] = !(modeMap[key] ?? false);
-    setState(() {});
-    final modeString = _build7BitString();
-    await widget.onModeChanged(modeString);
+    setState(() {
+      if (key == 'A1') {
+        modeMap['A1'] = true;
+        modeMap['A2'] = false;
+      } else if (key == 'A2') {
+        modeMap['A2'] = true;
+        modeMap['A1'] = false;
+      } else {
+        modeMap[key] = !(modeMap[key] ?? false);
+      }
+    });
+    // ذخیره آنی در حافظه گوشی
+    final modeStr = _build7BitString();
+    await widget.onModeChanged(modeStr);
   }
-
-  String _build7BitString() => modeKeys.map((k) => modeMap[k]! ? '1' : '0').join();
 
   @override
   Widget build(BuildContext context) {
@@ -539,7 +570,8 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
           children: modeKeys.map((k) {
             final isActive = modeMap[k] ?? false;
             return ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: isActive ? Colors.green : Colors.red),
               onPressed: () => _toggleMode(k),
               child: Text(k),
             );
