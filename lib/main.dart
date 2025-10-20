@@ -375,7 +375,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 }
-
 // ---------- SettingsPage ----------
 class SettingsPage extends StatefulWidget {
   final String userId;
@@ -405,7 +404,7 @@ class _SettingsPageState extends State<SettingsPage> {
     localMode = widget.userMode;
     localSymbolPrefs = Map<String, dynamic>.from(widget.symbolPrefs);
 
-    // اگر نماد جدیدی اضافه شد، پیش‌فرض Buy&Sell و همه تایم‌فریم‌ها خالی
+    // مقداردهی اولیه برای جفت‌ارزها
     for (var s in symbols) {
       if (!localSymbolPrefs.containsKey(s)) {
         localSymbolPrefs[s] = {
@@ -424,6 +423,7 @@ class _SettingsPageState extends State<SettingsPage> {
     await widget.onLocalPrefsChanged(localMode, localSymbolPrefs);
   }
 
+  // ---------- Symbol Modal ----------
   void _openSymbolModal(String symbol) {
     final prefsForSymbol = Map<String, dynamic>.from(localSymbolPrefs[symbol]!);
 
@@ -523,12 +523,15 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ---------- Mode Settings ----------
   void _openModeSettings() {
     final modeKeys = ['A1','A2','B','C','D','E','F','G'];
     Map<String,bool> modeMap = {};
     final init = localMode.padRight(7,'0').substring(0,7);
+
+    // null-safe
     modeMap['A1'] = init[0]=='1';
-    modeMap['A2'] = !modeMap['A1'];
+    modeMap['A2'] = !(modeMap['A1'] ?? false);
     final others = ['B','C','D','E','F','G'];
     for (int i=0;i<others.length;i++){
       modeMap[others[i]] = init.length>i+1 ? init[i+1]=='1' : false;
@@ -542,7 +545,7 @@ class _SettingsPageState extends State<SettingsPage> {
           void _toggleMode(String key){
             if(key=='A1'){modeMap['A1']=true; modeMap['A2']=false;}
             else if(key=='A2'){modeMap['A2']=true; modeMap['A1']=false;}
-            else{modeMap[key]=!(modeMap[key]??false);}
+            else{modeMap[key]=!(modeMap[key] ?? false);}
             setModal((){});
             _build7BitString(modeMap);
           }
@@ -568,7 +571,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           spacing: 8,
                           runSpacing: 8,
                           children: modeKeys.map((k){
-                            final isActive = modeMap[k]??false;
+                            final isActive = modeMap[k] ?? false;
                             return ElevatedButton(
                               style: ElevatedButton.styleFrom(backgroundColor: isActive?Colors.green:Colors.red),
                               onPressed: ()=>_toggleMode(k),
@@ -592,19 +595,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _build7BitString(Map<String,bool> modeMap){
     final bits = [
-      (modeMap['A1']??false)?'1':'0',
-      (modeMap['B']??false)?'1':'0',
-      (modeMap['C']??false)?'1':'0',
-      (modeMap['D']??false)?'1':'0',
-      (modeMap['E']??false)?'1':'0',
-      (modeMap['F']??false)?'1':'0',
-      (modeMap['G']??false)?'1':'0',
+      (modeMap['A1'] ?? false)?'1':'0',
+      (modeMap['B'] ?? false)?'1':'0',
+      (modeMap['C'] ?? false)?'1':'0',
+      (modeMap['D'] ?? false)?'1':'0',
+      (modeMap['E'] ?? false)?'1':'0',
+      (modeMap['F'] ?? false)?'1':'0',
+      (modeMap['G'] ?? false)?'1':'0',
     ];
     localMode = bits.join();
     _saveLocalPrefs();
     return localMode;
   }
 
+  // ---------- Send preferences ----------
   Future<void> _sendPreferencesToServer() async {
     final backupPrefs = Map<String,dynamic>.from(localSymbolPrefs);
     final backupMode = localMode;
@@ -650,6 +654,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  // ---------- UI ----------
   Widget _buildSymbolsWrap(){
     return Wrap(
       spacing: 8,
@@ -698,4 +703,3 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
-
