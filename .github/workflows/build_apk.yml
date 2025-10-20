@@ -18,7 +18,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.13.9'
+          flutter-version: '3.16.0'
           channel: 'stable'
 
       - name: Clean & upgrade dependencies
@@ -52,4 +52,4 @@ jobs:
           body: |
             سلام masood جان،
             فایل APK پروژه‌ات با موفقیت ساخته شد 🎉
-            می‌تونی از بخش Actions در GitHub و قسمت Artifactsدانلودش کنی.
+            می‌تونی از بخش Actions در GitHub و قسمت Artifacts دانلودش کنی.
