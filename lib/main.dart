@@ -24,6 +24,7 @@ final List<String> timeframes = [
   'M30','H1','H2','H3','H4','H6','H8','H12','D1','W1',
 ];
 
+// ---------- Firebase Background ----------
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 }
@@ -48,6 +49,7 @@ class IntroPage extends StatefulWidget {
 
 class _IntroPageState extends State<IntroPage> {
   late VideoPlayerController _controller;
+
   @override
   void initState() {
     super.initState();
@@ -56,23 +58,31 @@ class _IntroPageState extends State<IntroPage> {
         setState(() {});
         _controller.play();
       });
+
     _controller.addListener(() {
       if (_controller.value.position >= _controller.value.duration) {
         _goToHome();
       }
     });
+
     Future.delayed(const Duration(seconds: 6), () {
       if (mounted) _goToHome();
     });
   }
+
   void _goToHome() {
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const HomePage()),
+    );
   }
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -98,8 +108,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   String _userId = '';
   String _fcmToken = '';
-  String userMode = '0000000';
-  Map<String, dynamic> symbolPrefs = {};
+  String userMode = '0000000'; // 7-bit string
+  Map<String, dynamic> symbolPrefs = {}; // symbol -> { "timeframes": ["M1"], "direction": "BUY&SELL" }
   List<Map<String, dynamic>> _receivedImages = [];
 
   @override
@@ -134,17 +144,22 @@ class _HomePageState extends State<HomePage> {
             body: jsonEncode({'user_id': _userId, 'fcm_token': _fcmToken}));
       } catch (_) {}
     }
-    FirebaseMessaging.onMessage.listen((_) => _loadImagesFromServer());
-    FirebaseMessaging.onMessageOpenedApp.listen((_) => _loadImagesFromServer());
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _loadImagesFromServer();
+    });
+    FirebaseMessaging.onMessageOpenedApp.listen((_) {
+      _loadImagesFromServer();
+    });
   }
 
   Future<void> _loadLocalPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     final mode = prefs.getString('mode_7bit') ?? '0000000';
     final symJson = prefs.getString('symbol_prefs') ?? '{}';
+    final Map<String, dynamic> s = jsonDecode(symJson);
     setState(() {
       userMode = mode;
-      symbolPrefs = jsonDecode(symJson);
+      symbolPrefs = s;
     });
   }
 
@@ -176,6 +191,7 @@ class _HomePageState extends State<HomePage> {
       final int imgBit = int.parse(code[i + 1]);
       if (userBit == 1 && imgBit != 1) return false;
     }
+
     return true;
   }
 
@@ -194,43 +210,65 @@ class _HomePageState extends State<HomePage> {
             'url': img['image_url'],
             'symbol': img['symbol'],
             'timeframe': img['timeframe'],
+            'code_8bit': img['code_8bit'],
             'filename': img['filename'] ?? _extractFilename(img['image_url']),
+            'timestamp': img['timestamp'] != null
+                ? DateTime.fromMillisecondsSinceEpoch(img['timestamp']).toLocal()
+                : null,
           };
         }).toList();
         setState(() {
           _receivedImages = List<Map<String, dynamic>>.from(filtered);
         });
       }
-    } catch (_) {}
+    } catch (e) {}
   }
 
-  String _extractFilename(String url) => url.split('/').last;
+  String _extractFilename(String url) {
+    try {
+      return url.split('/').last;
+    } catch (e) {
+      return url;
+    }
+  }
 
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
     var status = await Permission.storage.request();
-    if (!status.isGranted) return;
+    if (!status.isGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Storage permission denied')));
+      return;
+    }
     try {
       final resp = await http.get(Uri.parse(url));
       if (resp.statusCode == 200) {
         final bytes = resp.bodyBytes;
         final directory = await getExternalStorageDirectory();
         final filename = '${symbol}_${timeframe}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final file = File('${directory!.path}/$filename');
+        final path = '${directory!.path}/$filename';
+        final file = File(path);
         await file.writeAsBytes(bytes);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: ${file.path}')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: ${file.path}')));
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download error: $e')));
+    }
   }
 
   Future<void> _deleteImageForUser(String url) async {
     try {
-      await http.post(Uri.parse('$SERVER_URL/delete_image'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'user_id': _userId, 'image_url': url}));
-      setState(() {
-        _receivedImages.removeWhere((i) => i['url'] == url);
-      });
-    } catch (_) {}
+      final resp = await http.post(Uri.parse('$SERVER_URL/delete_image'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'image_url': url}),
+      );
+      if (resp.statusCode == 200) {
+        setState(() {
+          _receivedImages.removeWhere((i) => i['url'] == url);
+        });
+        _loadImagesFromServer();
+      }
+    } catch (e) {}
   }
 
   void _showImageFullScreen(String imageUrl, String filename) {
@@ -253,8 +291,10 @@ class _HomePageState extends State<HomePage> {
           symbolPrefs = prefs;
         });
         await _saveLocalPrefs();
+        await _loadImagesFromServer();
       },
     )));
+    await _loadLocalPrefs();
     await _loadImagesFromServer();
   }
 
@@ -264,43 +304,70 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('داشبورد سیگنال‌ها'),
         actions: [
-          IconButton(icon: const Icon(Icons.settings), onPressed: _openSettings),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _openSettings,
+          )
         ],
       ),
-      body: _receivedImages.isEmpty
-          ? const Center(child: Text('هیچ تصویری برای نمایش نیست'))
-          : ListView.builder(
-              itemCount: _receivedImages.length,
-              itemBuilder: (context, i) {
-                final img = _receivedImages[i];
-                return Card(
-                  child: Column(
-                    children: [
-                      GestureDetector(
-                        onTap: () => _showImageFullScreen(img['url'], img['filename']),
-                        child: Image.network(img['url'], fit: BoxFit.cover),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: () => _downloadImage(img['url'], img['symbol'], img['timeframe']),
-                            icon: const Icon(Icons.download),
-                            label: const Text('دانلود'),
+      body: Column(
+        children: [
+          Expanded(
+            child: _receivedImages.isEmpty
+              ? const Center(child: Text('هیچ تصویری برای نمایش نیست'))
+              : ListView.builder(
+                itemCount: _receivedImages.length,
+                itemBuilder: (context, index) {
+                  final img = _receivedImages[index];
+                  final timestamp = img['timestamp'] as DateTime?;
+                  final tsText = timestamp != null ? timestamp.toString() : '—';
+                  final filename = img['filename'] ?? _extractFilename(img['url']);
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        GestureDetector(
+                          onTap: () => _showImageFullScreen(img['url'], filename),
+                          child: Image.network(img['url'], fit: BoxFit.cover),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text("جفت ارز: ${img['symbol']}"),
+                              Text("تایم فریم: ${img['timeframe']}"),
+                              Text("زمان: $tsText"),
+                              Text("نام تصویر: $filename", style: const TextStyle(color: Colors.grey)),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  ElevatedButton.icon(
+                                    onPressed: () => _downloadImage(img['url'], img['symbol'], img['timeframe']),
+                                    icon: const Icon(Icons.download),
+                                    label: const Text('دانلود'),
+                                  ),
+                                  ElevatedButton.icon(
+                                    onPressed: () => _deleteImageForUser(img['url']),
+                                    icon: const Icon(Icons.delete),
+                                    label: const Text('حذف'),
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                  ),
+                                ],
+                              )
+                            ],
                           ),
-                          ElevatedButton.icon(
-                            onPressed: () => _deleteImageForUser(img['url']),
-                            icon: const Icon(Icons.delete),
-                            label: const Text('حذف'),
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _loadImagesFromServer,
         child: const Icon(Icons.refresh),
@@ -329,7 +396,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late String localMode;
+  late String localMode; // 7-bit
   late Map<String, dynamic> localSymbolPrefs;
 
   @override
@@ -337,21 +404,36 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     localMode = widget.userMode;
     localSymbolPrefs = Map<String, dynamic>.from(widget.symbolPrefs);
+
+    // اگر نماد جدیدی اضافه شد، پیش‌فرض Buy&Sell و همه تایم‌فریم‌ها خالی
+    for (var s in symbols) {
+      if (!localSymbolPrefs.containsKey(s)) {
+        localSymbolPrefs[s] = {
+          'timeframes': <String>[],
+          'direction': 'BUY&SELL',
+        };
+      } else {
+        if (localSymbolPrefs[s]['direction'] == null) {
+          localSymbolPrefs[s]['direction'] = 'BUY&SELL';
+        }
+      }
+    }
   }
 
-  Future<void> _saveAndNotify() async {
+  Future<void> _saveLocalPrefs() async {
     await widget.onLocalPrefsChanged(localMode, localSymbolPrefs);
   }
 
   void _openSymbolModal(String symbol) {
+    final prefsForSymbol = Map<String, dynamic>.from(localSymbolPrefs[symbol]!);
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (_) {
-        final prefsForSymbol = Map<String, dynamic>.from(localSymbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'});
         return StatefulBuilder(builder: (contextModal, setModal) {
-          void _toggleTf(String tf) async {
-            final tfs = List<String>.from(prefsForSymbol['timeframes'] ?? []);
+          void _toggleTf(String tf) {
+            final tfs = List<String>.from(prefsForSymbol['timeframes']);
             if (tfs.contains(tf)) {
               tfs.remove(tf);
             } else {
@@ -359,60 +441,81 @@ class _SettingsPageState extends State<SettingsPage> {
             }
             prefsForSymbol['timeframes'] = tfs;
             localSymbolPrefs[symbol] = prefsForSymbol;
-            await _saveAndNotify();
+            _saveLocalPrefs();
             setModal(() {});
           }
 
-          void _setDirection(String dir) async {
+          void _setDirection(String dir) {
             prefsForSymbol['direction'] = dir;
             localSymbolPrefs[symbol] = prefsForSymbol;
-            await _saveAndNotify();
+            _saveLocalPrefs();
             setModal(() {});
+          }
+
+          if (prefsForSymbol['direction'] == null) {
+            prefsForSymbol['direction'] = 'BUY&SELL';
           }
 
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 8),
-                  Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  const SizedBox(height: 8),
-                  GridView.count(
-                    crossAxisCount: 5,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: timeframes.map((tf) {
-                      final isActive = (prefsForSymbol['timeframes'] as List<dynamic>).contains(tf);
-                      return Padding(
-                        padding: const EdgeInsets.all(4.0),
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            shape: const CircleBorder(),
-                            padding: EdgeInsets.zero,
-                            backgroundColor: isActive ? Colors.green : Colors.red,
-                          ),
-                          onPressed: () => _toggleTf(tf),
-                          child: Text(tf, style: const TextStyle(fontSize: 11)),
+            child: DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.7,
+              maxChildSize: 0.95,
+              minChildSize: 0.3,
+              builder: (context, scrollController) {
+                return Container(
+                  padding: const EdgeInsets.all(12),
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                        const SizedBox(height: 12),
+                        // تایم فریم‌ها
+                        GridView.count(
+                          crossAxisCount: 5,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: timeframes.map((tf) {
+                            final isActive = (prefsForSymbol['timeframes'] as List).contains(tf);
+                            return Padding(
+                              padding: const EdgeInsets.all(4.0),
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  shape: const CircleBorder(),
+                                  padding: EdgeInsets.zero,
+                                  backgroundColor: isActive ? Colors.green : Colors.red,
+                                ),
+                                onPressed: () => _toggleTf(tf),
+                                child: Text(tf, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              ),
+                            );
+                          }).toList(),
                         ),
-                      );
-                    }).toList(),
+                        const SizedBox(height: 12),
+                        // جهت (Buy/Sell/Buy&Sell)
+                        Wrap(
+                          spacing: 8,
+                          children: ['BUY','SELL','BUY&SELL'].map((pos) {
+                            final isActive = prefsForSymbol['direction'] == pos;
+                            return ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isActive ? Colors.green : Colors.red,
+                              ),
+                              onPressed: () => _setDirection(pos),
+                              child: Text(pos),
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text('برای خروج صفحه را به سمت پایین بکشید'),
+                      ],
+                    ),
                   ),
-                  Wrap(
-                    spacing: 8,
-                    children: ['BUY','SELL','BUY&SELL'].map((pos) {
-                      final isActive = prefsForSymbol['direction'] == pos;
-                      return ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
-                        onPressed: () => _setDirection(pos),
-                        child: Text(pos),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-              ),
+                );
+              },
             ),
           );
         });
@@ -421,73 +524,174 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _openModeSettings() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => ModeSettingsPage(
-      initialMode: localMode,
-      onModeChanged: (newMode) async {
-        localMode = newMode;
-        await _saveAndNotify();
+    final modeKeys = ['A1','A2','B','C','D','E','F','G'];
+    Map<String,bool> modeMap = {};
+    final init = localMode.padRight(7,'0').substring(0,7);
+    modeMap['A1'] = init[0]=='1';
+    modeMap['A2'] = !modeMap['A1'];
+    final others = ['B','C','D','E','F','G'];
+    for (int i=0;i<others.length;i++){
+      modeMap[others[i]] = init.length>i+1 ? init[i+1]=='1' : false;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) {
+        return StatefulBuilder(builder: (contextModal,setModal){
+          void _toggleMode(String key){
+            if(key=='A1'){modeMap['A1']=true; modeMap['A2']=false;}
+            else if(key=='A2'){modeMap['A2']=true; modeMap['A1']=false;}
+            else{modeMap[key]=!(modeMap[key]??false);}
+            setModal((){});
+            _build7BitString(modeMap);
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
+            child: DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.5,
+              maxChildSize: 0.9,
+              minChildSize: 0.3,
+              builder: (context,scrollController){
+                return Container(
+                  padding: const EdgeInsets.all(12),
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Mode Buttons', style: TextStyle(fontWeight: FontWeight.bold,fontSize: 16)),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: modeKeys.map((k){
+                            final isActive = modeMap[k]??false;
+                            return ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: isActive?Colors.green:Colors.red),
+                              onPressed: ()=>_toggleMode(k),
+                              child: Text(k),
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text('برای خروج صفحه را به سمت پایین بکشید'),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        });
       },
-    )));
+    );
+  }
+
+  String _build7BitString(Map<String,bool> modeMap){
+    final bits = [
+      (modeMap['A1']??false)?'1':'0',
+      (modeMap['B']??false)?'1':'0',
+      (modeMap['C']??false)?'1':'0',
+      (modeMap['D']??false)?'1':'0',
+      (modeMap['E']??false)?'1':'0',
+      (modeMap['F']??false)?'1':'0',
+      (modeMap['G']??false)?'1':'0',
+    ];
+    localMode = bits.join();
+    _saveLocalPrefs();
+    return localMode;
   }
 
   Future<void> _sendPreferencesToServer() async {
-    final prevPrefs = Map<String, dynamic>.from(localSymbolPrefs);
-    final prevMode = localMode;
-    try {
-      final rsp = await http.post(
-        Uri.parse('$SERVER_URL/save_preferences'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_id': widget.userId, 'mode': localMode, 'symbol_prefs': localSymbolPrefs}),
-      );
-      if (rsp.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ تنظیمات در سرور ذخیره شد.')));
-      } else {
-        localSymbolPrefs = prevPrefs;
-        localMode = prevMode;
-        await _saveAndNotify();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ خطا در ذخیره، تنظیمات بازگردانده شد.')));
+    final backupPrefs = Map<String,dynamic>.from(localSymbolPrefs);
+    final backupMode = localMode;
+
+    final List<Map<String,dynamic>> syms = [];
+    localSymbolPrefs.forEach((key,value){
+      final tfs = value['timeframes'] ?? [];
+      final dir = value['direction'] ?? 'BUY&SELL';
+      if(tfs.isNotEmpty){
+        syms.add({
+          'symbol': key,
+          'timeframes': List<String>.from(tfs),
+          'direction': dir,
+        });
       }
-    } catch (e) {
-      localSymbolPrefs = prevPrefs;
-      localMode = prevMode;
-      await _saveAndNotify();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ خطا در اتصال، تنظیمات بازگردانده شد.')));
+    });
+    final payload = {
+      'user_id': widget.userId,
+      'mode': localMode,
+      'symbols': syms,
+    };
+
+    try{
+      final rsp = await http.post(Uri.parse('$SERVER_URL/save_preferences'),
+        headers: {'Content-Type':'application/json'},
+        body: jsonEncode(payload),
+      );
+      if(rsp.statusCode==200){
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تنظیمات با موفقیت ارسال شد')));
+      }else{
+        setState((){
+          localSymbolPrefs = backupPrefs;
+          localMode = backupMode;
+        });
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خطا: تنظیمات ثبت نشد')));
+      }
+    }catch(e){
+      setState((){
+        localSymbolPrefs = backupPrefs;
+        localMode = backupMode;
+      });
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطا: $e')));
     }
   }
 
+  Widget _buildSymbolsWrap(){
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: symbols.map((s){
+        return ElevatedButton(
+          onPressed: ()=>_openSymbolModal(s),
+          style: ElevatedButton.styleFrom(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: Text(s, style: const TextStyle(fontSize: 13,fontWeight: FontWeight.bold)),
+        );
+      }).toList(),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context){
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(
+        title: const Text('Settings'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: symbols.map((s) {
-                return ElevatedButton(
-                  onPressed: () => _openSymbolModal(s),
-                  style: ElevatedButton.styleFrom(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text(s, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                );
-              }).toList(),
-            ),
+            _buildSymbolsWrap(),
             const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: _openModeSettings,
-              icon: const Icon(Icons.tune),
+              icon: const Icon(Icons.settings),
               label: const Text('Mode Settings'),
             ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
               onPressed: _sendPreferencesToServer,
-              icon: const Icon(Icons.cloud_upload),
+              icon: const Icon(Icons.send),
               label: const Text('ارسال تنظیمات به سرور'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
             ),
+            const SizedBox(height: 12),
+            const Text('توضیح: تغییرات تایم‌فریم و جهت هر جفت‌ارز بلافاصله ذخیره می‌شود. برای ارسال نهایی به سرور از دکمه بالا استفاده کنید.'),
           ],
         ),
       ),
@@ -495,89 +699,3 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-// ---------- ModeSettingsPage ----------
-class ModeSettingsPage extends StatefulWidget {
-  final String initialMode;
-  final Function(String) onModeChanged;
-
-  const ModeSettingsPage({super.key, required this.initialMode, required this.onModeChanged});
-
-  @override
-  State<ModeSettingsPage> createState() => _ModeSettingsPageState();
-}
-
-class _ModeSettingsPageState extends State<ModeSettingsPage> {
-  late Map<String, bool> modeMap;
-  final List<String> modeKeys = ['A1', 'A2', 'B', 'C', 'D', 'E', 'F', 'G'];
-
-  @override
-  void initState() {
-    super.initState();
-    // initialMode length 7
-    final bits = widget.initialMode.padRight(7, '0').substring(0,7);
-    modeMap = {};
-    // A1/A2 logic: A1 = bits[0], A2 = !A1
-    modeMap['A1'] = bits[0] == '1';
-    modeMap['A2'] = !modeMap['A1']!;
-    // B..G
-    final otherKeys = ['B','C','D','E','F','G'];
-    for (int i = 0; i < otherKeys.length; i++) {
-      modeMap[otherKeys[i]] = bits.length > i+1 ? bits[i+1] == '1' : false;
-    }
-  }
-
-  // ساخت رشته ۷ بیتی برای ذخیره
-  String _build7BitString() {
-    final a1 = modeMap['A1']! ? '1' : '0';
-    final bits = [
-      a1,
-      modeMap['B']! ? '1' : '0',
-      modeMap['C']! ? '1' : '0',
-      modeMap['D']! ? '1' : '0',
-      modeMap['E']! ? '1' : '0',
-      modeMap['F']! ? '1' : '0',
-      modeMap['G']! ? '1' : '0',
-    ];
-    return bits.join();
-  }
-
-  void _toggleMode(String key) async {
-    setState(() {
-      if (key == 'A1') {
-        modeMap['A1'] = true;
-        modeMap['A2'] = false;
-      } else if (key == 'A2') {
-        modeMap['A2'] = true;
-        modeMap['A1'] = false;
-      } else {
-        modeMap[key] = !(modeMap[key] ?? false);
-      }
-    });
-    // ذخیره آنی در حافظه گوشی
-    final modeStr = _build7BitString();
-    await widget.onModeChanged(modeStr);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mode Settings')),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: modeKeys.map((k) {
-            final isActive = modeMap[k] ?? false;
-            return ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: isActive ? Colors.green : Colors.red),
-              onPressed: () => _toggleMode(k),
-              child: Text(k),
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-}
