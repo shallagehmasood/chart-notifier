@@ -2,14 +2,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player/video_player.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:photo_view/photo_view.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:video_player/video_player.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 const String SERVER_URL = 'http://178.63.171.244:5000';
 
@@ -36,8 +37,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    final label = '$symbol|$timeframe|$timestamp';
+    final label = '$symbol|$timeframe';
     images.insert(0, imageUrl);
     filenames.insert(0, label);
     await prefs.setStringList('images', images);
@@ -49,21 +49,20 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
   runApp(const MaterialApp(
     debugShowCheckedModeBanner: false,
-    home: IntroPage(), // ابتدا پخش ویدیو
+    home: VideoSplashScreen(),
   ));
 }
 
-// ---------- IntroPage (Video Intro) ----------
-class IntroPage extends StatefulWidget {
-  const IntroPage({super.key});
+// ---------- Video SplashScreen ----------
+class VideoSplashScreen extends StatefulWidget {
+  const VideoSplashScreen({super.key});
   @override
-  State<IntroPage> createState() => _IntroPageState();
+  State<VideoSplashScreen> createState() => _VideoSplashScreenState();
 }
 
-class _IntroPageState extends State<IntroPage> {
+class _VideoSplashScreenState extends State<VideoSplashScreen> {
   late VideoPlayerController _controller;
 
   @override
@@ -74,23 +73,14 @@ class _IntroPageState extends State<IntroPage> {
         setState(() {});
         _controller.play();
       });
-
     _controller.addListener(() {
       if (_controller.value.position >= _controller.value.duration) {
-        _goToHome();
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomePage()),
+        );
       }
     });
-
-    Future.delayed(const Duration(seconds: 6), () {
-      if (mounted) _goToHome();
-    });
-  }
-
-  void _goToHome() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const HomePage()),
-    );
   }
 
   @override
@@ -102,14 +92,18 @@ class _IntroPageState extends State<IntroPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: _controller.value.isInitialized
-            ? AspectRatio(
-                aspectRatio: _controller.value.aspectRatio,
-                child: VideoPlayer(_controller),
-              )
-            : const CircularProgressIndicator(),
-      ),
+      body: _controller.value.isInitialized
+          ? SizedBox.expand(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _controller.value.size.width,
+                  height: _controller.value.size.height,
+                  child: VideoPlayer(_controller),
+                ),
+              ),
+            )
+          : const Center(child: CircularProgressIndicator()),
     );
   }
 }
@@ -127,6 +121,21 @@ class _HomePageState extends State<HomePage> {
   Map<String, Set<String>> subscribed = {};
   List<String> _receivedImages = [];
   List<String> _receivedFilenames = [];
+
+  // Global MODE
+  Map<String, bool> mode = {
+    "A1": false,
+    "A2": false,
+    "B": false,
+    "C": false,
+    "D": false,
+    "E": false,
+    "F": false,
+    "G": false
+  };
+
+  // BUY/SELL/BUY&SELL for each symbol
+  Map<String, String> positions = {};
 
   @override
   void initState() {
@@ -156,7 +165,6 @@ class _HomePageState extends State<HomePage> {
     _fcmToken = await FirebaseMessaging.instance.getToken();
     if (_fcmToken != null) {
       await _registerOnServer(_fcmToken!);
-      await _loadSubscriptions();
     }
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final imageUrl = message.data['image_url'];
@@ -181,8 +189,7 @@ class _HomePageState extends State<HomePage> {
     final parts = filename.split('_');
     final symbol = parts.isNotEmpty ? parts[0] : '';
     final timeframe = parts.length > 1 ? parts[1] : '';
-    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    final label = '$symbol|$timeframe|$timestamp';
+    final label = '$symbol|$timeframe';
     setState(() {
       _receivedImages.insert(0, imageUrl);
       _receivedFilenames.insert(0, label);
@@ -217,10 +224,8 @@ class _HomePageState extends State<HomePage> {
       final List images = data['images'];
       setState(() {
         _receivedImages = images.map((e) => e['image_url'] as String).toList();
-        _receivedFilenames = images
-            .map((e) =>
-                '${e['symbol']}|${e['timeframe']}|${DateTime.now().millisecondsSinceEpoch}')
-            .toList();
+        _receivedFilenames =
+            images.map((e) => '${e['symbol']}|${e['timeframe']}').toList();
       });
       await _saveImagesToStorage();
     }
@@ -234,48 +239,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _loadSubscriptions() async {
-    final response = await http.post(
-      Uri.parse('$SERVER_URL/subscriptions'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'user_id': _userId}),
-    );
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final List subs = data['subscriptions'];
-      setState(() {
-        subscribed.clear();
-        for (var sub in subs) {
-          final symbol = sub['symbol'];
-          final tf = sub['timeframe'];
-          subscribed.putIfAbsent(symbol, () => {}).add(tf);
-        }
-      });
-    }
-  }
-
-  Future<void> _subscribe(String symbol, String timeframe) async {
-    await http.post(
-      Uri.parse('$SERVER_URL/subscribe'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'user_id': _userId, 'symbol': symbol, 'timeframe': timeframe}),
-    );
-    setState(() {
-      subscribed.putIfAbsent(symbol, () => {}).add(timeframe);
-    });
-  }
-
-  Future<void> _unsubscribe(String symbol, String timeframe) async {
-    await http.post(
-      Uri.parse('$SERVER_URL/unsubscribe'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'user_id': _userId, 'symbol': symbol, 'timeframe': timeframe}),
-    );
-    setState(() {
-      subscribed[symbol]?.remove(timeframe);
-    });
-  }
-
   void _showTimeframeSelector(String symbol) {
     showModalBottomSheet(
       context: context,
@@ -283,42 +246,66 @@ class _HomePageState extends State<HomePage> {
       builder: (_) {
         return StatefulBuilder(
           builder: (context, setStateModal) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                GridView.count(
-                  crossAxisCount: 5,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: timeframes.map((tf) {
-                    final isActive = subscribed[symbol]?.contains(tf) ?? false;
-                    return Padding(
-                      padding: const EdgeInsets.all(4.0),
-                      child: ElevatedButton(
+            return Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(symbol,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  GridView.count(
+                    crossAxisCount: 5,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: timeframes.map((tf) {
+                      final isActive =
+                          subscribed[symbol]?.contains(tf) ?? false;
+                      return Padding(
+                        padding: const EdgeInsets.all(4.0),
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: EdgeInsets.zero,
+                            backgroundColor:
+                                isActive ? Colors.green : Colors.red,
+                          ),
+                          onPressed: () async {
+                            if (isActive) {
+                              await _unsubscribe(symbol, tf);
+                            } else {
+                              await _subscribe(symbol, tf);
+                            }
+                            setStateModal(() {});
+                          },
+                          child: Text(
+                            tf,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: ["BUY", "SELL", "BUY&SELL"].map((pos) {
+                      final isActive = positions[symbol] == pos;
+                      return ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          shape: const CircleBorder(),
-                          padding: EdgeInsets.zero,
-                          backgroundColor: isActive ? Colors.green : Colors.red,
+                          backgroundColor: isActive ? Colors.green : Colors.grey,
                         ),
                         onPressed: () {
-                          if (isActive) {
-                            _unsubscribe(symbol, tf);
-                          } else {
-                            _subscribe(symbol, tf);
-                          }
+                          positions[symbol] = pos;
                           setStateModal(() {});
                         },
-                        child: Text(tf,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
+                        child: Text(pos),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
             );
           },
         );
@@ -339,30 +326,152 @@ class _HomePageState extends State<HomePage> {
       itemCount: symbols.length,
       itemBuilder: (context, index) {
         final symbol = symbols[index];
+        positions.putIfAbsent(symbol, () => "BUY");
         return ElevatedButton(
-          onPressed: () => _showTimeframeSelector(symbol),
           style: ElevatedButton.styleFrom(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            padding: const EdgeInsets.all(8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
+          onPressed: () => _showTimeframeSelector(symbol),
           child: Text(symbol,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+              textAlign: TextAlign.center,
+              style:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
         );
       },
     );
   }
 
+  void _showModeSelector() {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) {
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            return Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("MODE",
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Wrap(
+                    spacing: 8,
+                    children: mode.keys.map((key) {
+                      final isActive = mode[key]!;
+                      return ChoiceChip(
+                        label: Text(key),
+                        selected: isActive,
+                        onSelected: (val) {
+                          if (key == "A1" && val) {
+                            mode["A2"] = false;
+                          } else if (key == "A2" && val) {
+                            mode["A1"] = false;
+                          }
+                          mode[key] = val;
+                          setStateModal(() {});
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed: _sendToServer,
+                    child: const Text("ارسال به سرور"),
+                  )
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _sendToServer() async {
+    final data = {
+      "user_id": _userId,
+      "mode": mode,
+      "preferences": symbols
+          .map((s) => {
+                "symbol": s,
+                "position": positions[s],
+                "timeframes": subscribed[s]?.toList() ?? []
+              })
+          .toList(),
+    };
+    try {
+      final response = await http.post(
+        Uri.parse('$SERVER_URL/save_preferences'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      );
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("تنظیمات با موفقیت ثبت شد")),
+        );
+        setState(() {}); // می‌تواند رنگ‌ها و وضعیت را تغییر دهد
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("خطا در ارسال: ${response.statusCode}")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("خطا در ارسال: $e")),
+      );
+    }
+  }
+
+  Future<void> _subscribe(String symbol, String timeframe) async {
+    final response = await http.post(
+      Uri.parse('$SERVER_URL/subscribe'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': _userId, 'symbol': symbol, 'timeframe': timeframe}),
+    );
+    if (response.statusCode == 200) {
+      setState(() {
+        subscribed.putIfAbsent(symbol, () => {}).add(timeframe);
+      });
+    }
+  }
+
+  Future<void> _unsubscribe(String symbol, String timeframe) async {
+    final response = await http.post(
+      Uri.parse('$SERVER_URL/unsubscribe'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': _userId, 'symbol': symbol, 'timeframe': timeframe}),
+    );
+    if (response.statusCode == 200) {
+      setState(() {
+        subscribed[symbol]?.remove(timeframe);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('اعلان چارت‌ها')),
+      appBar: AppBar(
+        title: const Text('اعلان چارت‌ها'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showModeSelector,
+          )
+        ],
+      ),
       body: Column(
         children: [
           Expanded(child: buildSymbolGrid()),
           const Divider(),
           const Padding(
             padding: EdgeInsets.all(8.0),
-            child:
-                Text('تصاویر دریافت‌شده', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: Text('تصاویر دریافت‌شده',
+                style: TextStyle(fontWeight: FontWeight.bold)),
           ),
           Expanded(
             child: ListView.builder(
@@ -373,15 +482,11 @@ class _HomePageState extends State<HomePage> {
                 final parts = meta.split('|');
                 final symbol = parts.isNotEmpty ? parts[0] : '';
                 final timeframe = parts.length > 1 ? parts[1] : '';
-                final timestamp = parts.length > 2
-                    ? DateTime.fromMillisecondsSinceEpoch(
-                        int.parse(parts[2])).toLocal().toString()
-                    : '';
                 return GestureDetector(
                   onTap: () => _showImageFullScreen(url),
                   child: Card(
-                    margin:
-                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    margin: const EdgeInsets.symmetric(
+                        vertical: 8, horizontal: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -392,10 +497,12 @@ class _HomePageState extends State<HomePage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text('اطلاعات تصویر',
-                                  style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text('جفت ارز: $symbol', style: const TextStyle(fontSize: 12)),
-                              Text('تایم‌فریم: $timeframe', style: const TextStyle(fontSize: 12)),
-                              Text('زمان: $timestamp', style: const TextStyle(fontSize: 12)),
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
+                              Text('جفت ارز: $symbol',
+                                  style: const TextStyle(fontSize: 12)),
+                              Text('تایم‌فریم: $timeframe',
+                                  style: const TextStyle(fontSize: 12)),
                             ],
                           ),
                         ),
@@ -404,7 +511,8 @@ class _HomePageState extends State<HomePage> {
                           children: [
                             ElevatedButton.icon(
                               onPressed: () async {
-                                var status = await Permission.storage.request();
+                                var status =
+                                    await Permission.storage.request();
                                 if (!status.isGranted) return;
                                 try {
                                   final response = await http.get(Uri.parse(url));
@@ -412,21 +520,25 @@ class _HomePageState extends State<HomePage> {
                                     final bytes = response.bodyBytes;
                                     final directory =
                                         await getExternalStorageDirectory();
-                                    final filename =
-                                        '${symbol}_${timeframe}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                                    final path = '${directory!.path}/$filename';
+                                    final path =
+                                        '${directory!.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
                                     final file = File(path);
                                     await file.writeAsBytes(bytes);
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('ذخیره شد: ${file.path}')),
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                            content: Text('ذخیره شد: ${file.path}')),
                                       );
                                     }
                                   }
                                 } catch (e) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('خطا در ذخیره: $e')),
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      SnackBar(
+                                          content:
+                                              Text('خطا در ذخیره: $e')),
                                     );
                                   }
                                 }
@@ -444,8 +556,10 @@ class _HomePageState extends State<HomePage> {
                                 await http.post(
                                   Uri.parse('$SERVER_URL/delete_image'),
                                   headers: {'Content-Type': 'application/json'},
-                                  body: jsonEncode(
-                                      {'user_id': _userId, 'image_url': url}),
+                                  body: jsonEncode({
+                                    'user_id': _userId,
+                                    'image_url': url
+                                  }),
                                 );
                               },
                               icon: const Icon(Icons.delete),
@@ -475,8 +589,7 @@ class _HomePageState extends State<HomePage> {
           appBar: AppBar(title: const Text('نمایش تصویر')),
           body: PhotoView(
             imageProvider: NetworkImage(imageUrl),
-            backgroundDecoration:
-                const BoxDecoration(color: Colors.black),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
           ),
         ),
       ),
