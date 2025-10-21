@@ -26,10 +26,12 @@ final List<String> timeframes = [
 
 final List<String> sessions = ['توکیو','لندن','نیویورک','سیدنی'];
 
+// ---------------- Firebase Background ----------------
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 }
 
+// ---------------- Main ----------------
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -41,7 +43,7 @@ void main() async {
   ));
 }
 
-// ---------- IntroPage ----------
+// ---------------- IntroPage ----------------
 class IntroPage extends StatefulWidget {
   const IntroPage({super.key});
   @override
@@ -50,6 +52,7 @@ class IntroPage extends StatefulWidget {
 
 class _IntroPageState extends State<IntroPage> {
   late VideoPlayerController _controller;
+
   @override
   void initState() {
     super.initState();
@@ -95,7 +98,7 @@ class _IntroPageState extends State<IntroPage> {
   }
 }
 
-// ---------- HomePage ----------
+// ---------------- HomePage ----------------
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -107,13 +110,13 @@ class _HomePageState extends State<HomePage> {
   String _fcmToken = '';
   String userMode = '0000000';
   Map<String, dynamic> symbolPrefs = {};
-  List<Map<String, dynamic>> _receivedImages = [];
   Map<String,bool> sessionPrefs = {
     'توکیو': false,
     'لندن': false,
     'نیویورک': false,
     'سیدنی': false,
   };
+  List<Map<String, dynamic>> _receivedImages = [];
 
   @override
   void initState() {
@@ -270,6 +273,7 @@ class _HomePageState extends State<HomePage> {
       isScrollControlled: true,
       builder: (_) {
         return StatefulBuilder(builder: (contextModal,setModal){
+          Map<String,bool> _loading = {}; // برای هر سشن
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
             child: Column(
@@ -277,17 +281,41 @@ class _HomePageState extends State<HomePage> {
               children: sessions.map((s){
                 final selected = sessionPrefs[s] ?? false;
                 return ListTile(
-                  leading: Checkbox(
-                    value: selected,
-                    onChanged: (v){
-                      setModal(()=>sessionPrefs[s] = v ?? false);
-                      _saveLocalPrefs();
-                    },
-                  ),
+                  leading: _loading[s] == true
+                      ? const SizedBox(
+                          width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Checkbox(
+                          value: selected,
+                          onChanged: (v) async {
+                            _loading[s] = true;
+                            setModal(() {});
+                            bool success = await _sendSessionToServer(s, v ?? false);
+                            if (success) {
+                              sessionPrefs[s] = v ?? false;
+                              await _saveLocalPrefs();
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('خطا در ثبت تغییرات')));
+                            }
+                            _loading[s] = false;
+                            setModal(() {});
+                          },
+                        ),
                   title: Text(s),
-                  onTap: (){
-                    setModal(()=>sessionPrefs[s] = !(sessionPrefs[s]??false));
-                    _saveLocalPrefs();
+                  onTap: () async {
+                    final newVal = !(sessionPrefs[s] ?? false);
+                    _loading[s] = true;
+                    setModal(() {});
+                    bool success = await _sendSessionToServer(s, newVal);
+                    if (success) {
+                      sessionPrefs[s] = newVal;
+                      await _saveLocalPrefs();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('خطا در ثبت تغییرات')));
+                    }
+                    _loading[s] = false;
+                    setModal(() {});
                   },
                 );
               }).toList(),
@@ -296,6 +324,19 @@ class _HomePageState extends State<HomePage> {
         });
       },
     );
+  }
+
+  Future<bool> _sendSessionToServer(String session, bool value) async {
+    try {
+      final rsp = await http.post(
+        Uri.parse('$SERVER_URL/update_session'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'session': session, 'value': value}),
+      );
+      return rsp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _openModeSettings() {
@@ -334,6 +375,7 @@ appBar: AppBar(
               userId: _userId,
               userMode: userMode,
               symbolPrefs: symbolPrefs,
+              sessionPrefs: sessionPrefs,
               onLocalPrefsChanged: (mode, prefs) async {
                 setState(() {
                   userMode = mode;
@@ -390,11 +432,12 @@ appBar: AppBar(
   }
 }
 
-// ---------- SettingsPanel ----------
+// ---------------- SettingsPanel ----------------
 class SettingsPanel extends StatefulWidget {
   final String userId;
   final String userMode;
   final Map<String, dynamic> symbolPrefs;
+  final Map<String,bool> sessionPrefs;
   final Function(String, Map<String, dynamic>) onLocalPrefsChanged;
   final VoidCallback onSessionSettingsPressed;
   final VoidCallback onModeSettingsPressed;
@@ -404,6 +447,7 @@ class SettingsPanel extends StatefulWidget {
     required this.userId,
     required this.userMode,
     required this.symbolPrefs,
+    required this.sessionPrefs,
     required this.onLocalPrefsChanged,
     required this.onSessionSettingsPressed,
     required this.onModeSettingsPressed,
@@ -416,6 +460,8 @@ class SettingsPanel extends StatefulWidget {
 class _SettingsPanelState extends State<SettingsPanel> {
   late String localMode;
   late Map<String, dynamic> localSymbolPrefs;
+  Map<String,bool> _tfLoading = {};
+  Map<String,bool> _dirLoading = {};
 
   @override
   void initState() {
@@ -437,22 +483,39 @@ class _SettingsPanelState extends State<SettingsPanel> {
             localSymbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'});
         return StatefulBuilder(builder: (contextModal, setModal) {
           void _toggleTf(String tf) async {
-            final tfs = List<String>.from(prefsForSymbol['timeframes'] ?? []);
-            if (tfs.contains(tf)) {
-              tfs.remove(tf);
+            _tfLoading[tf] = true;
+            setModal(() {});
+            bool success = await _sendTfToServer(symbol, tf);
+            if (success) {
+              final tfs = List<String>.from(prefsForSymbol['timeframes'] ?? []);
+              if (tfs.contains(tf)) tfs.remove(tf);
+              else tfs.add(tf);
+              prefsForSymbol['timeframes'] = tfs;
+              localSymbolPrefs[symbol] = prefsForSymbol;
+              await _saveAndNotify();
+              setModal(() {});
             } else {
-              tfs.add(tf);
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('خطا در ثبت تغییرات')));
             }
-            prefsForSymbol['timeframes'] = tfs;
-            localSymbolPrefs[symbol] = prefsForSymbol;
-            await _saveAndNotify();
+            _tfLoading[tf] = false;
             setModal(() {});
           }
 
           void _setDirection(String dir) async {
-            prefsForSymbol['direction'] = dir;
-            localSymbolPrefs[symbol] = prefsForSymbol;
-            await _saveAndNotify();
+            _dirLoading[dir] = true;
+            setModal(() {});
+            bool success = await _sendDirectionToServer(symbol, dir);
+            if (success) {
+              prefsForSymbol['direction'] = dir;
+              localSymbolPrefs[symbol] = prefsForSymbol;
+              await _saveAndNotify();
+              setModal(() {});
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('خطا در ثبت تغییرات')));
+            }
+            _dirLoading[dir] = false;
             setModal(() {});
           }
 
@@ -479,7 +542,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                             padding: EdgeInsets.zero,
                             backgroundColor: isActive ? Colors.green : Colors.red,
                           ),
-                          onPressed: () => _toggleTf(tf),
+                          onPressed: _tfLoading[tf] == true ? null : () => _toggleTf(tf),
                           child: Text(tf, style: const TextStyle(fontSize: 11)),
                         ),
                       );
@@ -490,8 +553,10 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     children: ['BUY','SELL','BUY&SELL'].map((pos) {
                       final isActive = prefsForSymbol['direction'] == pos;
                       return ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
-                        onPressed: () => _setDirection(pos),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isActive ? Colors.green : Colors.red,
+                        ),
+                        onPressed: _dirLoading[pos] == true ? null : () => _setDirection(pos),
                         child: Text(pos),
                       );
                     }).toList(),
@@ -504,6 +569,32 @@ class _SettingsPanelState extends State<SettingsPanel> {
         });
       },
     );
+  }
+
+  Future<bool> _sendTfToServer(String symbol, String tf) async {
+    try {
+      final rsp = await http.post(
+        Uri.parse('$SERVER_URL/update_tf'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': widget.userId, 'symbol': symbol, 'timeframe': tf}),
+      );
+      return rsp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _sendDirectionToServer(String symbol, String dir) async {
+    try {
+      final rsp = await http.post(
+        Uri.parse('$SERVER_URL/update_direction'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': widget.userId, 'symbol': symbol, 'direction': dir}),
+      );
+      return rsp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
@@ -546,7 +637,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
     );
   }
 }
-// ---------- ModeSettingsPage ----------
+
+// ---------------- ModeSettingsPage ----------------
 class ModeSettingsPage extends StatefulWidget {
   final String initialMode;
   final Function(String) onModeChanged;
@@ -580,7 +672,7 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
     final bits = widget.initialMode.padRight(7, '0').substring(0, 7);
     modeMap = {
       'A1': bits[0] == '1',
-      'A2': bits[0] == '0', // اگر A1 فعال نباشد، A2 فعال می‌شود
+      'A2': bits[0] == '0',
       'B': bits[1] == '1',
       'C': bits[2] == '1',
       'D': bits[3] == '1',
