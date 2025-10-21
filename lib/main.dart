@@ -306,7 +306,7 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
-        return ModeSettingsBottomSheet(
+        return ModeSettingsPage(
           initialMode: userMode,
           onModeChanged: (newMode) async {
             setState(() {
