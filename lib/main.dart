@@ -24,6 +24,8 @@ final List<String> timeframes = [
   'M30','H1','H2','H3','H4','H6','H8','H12','D1','W1',
 ];
 
+final List<String> sessions = ['توکیو','لندن','نیویورک','سیدنی'];
+
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 }
@@ -106,6 +108,12 @@ class _HomePageState extends State<HomePage> {
   String userMode = '0000000';
   Map<String, dynamic> symbolPrefs = {};
   List<Map<String, dynamic>> _receivedImages = [];
+  Map<String,bool> sessionPrefs = {
+    'توکیو': false,
+    'لندن': false,
+    'نیویورک': false,
+    'سیدنی': false,
+  };
 
   @override
   void initState() {
@@ -147,9 +155,16 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     final mode = prefs.getString('mode_7bit') ?? '0000000';
     final symJson = prefs.getString('symbol_prefs') ?? '{}';
+    final sessionJson = prefs.getString('session_prefs') ?? '{}';
     setState(() {
       userMode = mode;
       symbolPrefs = jsonDecode(symJson);
+      if(sessionJson.isNotEmpty){
+        final Map<String,dynamic> s = jsonDecode(sessionJson);
+        for(var k in s.keys){
+          sessionPrefs[k] = s[k];
+        }
+      }
     });
   }
 
@@ -157,6 +172,7 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('mode_7bit', userMode);
     await prefs.setString('symbol_prefs', jsonEncode(symbolPrefs));
+    await prefs.setString('session_prefs', jsonEncode(sessionPrefs));
   }
 
   bool _shouldDisplayImageForUser(Map<String, dynamic> image) {
@@ -199,7 +215,7 @@ class _HomePageState extends State<HomePage> {
             'url': img['image_url'],
             'symbol': img['symbol'],
             'timeframe': img['timeframe'],
-            'filename': img['filename'] ?? _extractFilename(img['image_url']),
+            'filename': img['filename'] ?? img['image_url'].split('/').last,
           };
         }).toList();
         setState(() {
@@ -208,8 +224,6 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (_) {}
   }
-
-  String _extractFilename(String url) => url.split('/').last;
 
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
     var status = await Permission.storage.request();
@@ -250,10 +264,44 @@ class _HomePageState extends State<HomePage> {
     }));
   }
 
+  void _openSessionModal() async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) {
+        return StatefulBuilder(builder: (contextModal,setModal){
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: sessions.map((s){
+                final selected = sessionPrefs[s] ?? false;
+                return ListTile(
+                  leading: Checkbox(
+                    value: selected,
+                    onChanged: (v){
+                      setModal(()=>sessionPrefs[s] = v ?? false);
+                      _saveLocalPrefs();
+                    },
+                  ),
+                  title: Text(s),
+                  onTap: (){
+                    setModal(()=>sessionPrefs[s] = !(sessionPrefs[s]??false));
+                    _saveLocalPrefs();
+                  },
+                );
+              }).toList(),
+            ),
+          );
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('داشبورد کاربر')),
+      appBar: AppBar(title: const Text('Amino_First_Hidden')),
       body: Column(
         children: [
           Expanded(
@@ -270,6 +318,7 @@ class _HomePageState extends State<HomePage> {
                 await _saveLocalPrefs();
                 await _loadImagesFromServer();
               },
+              onSessionSettingsPressed: _openSessionModal,
             ),
           ),
           Expanded(
@@ -312,10 +361,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _loadImagesFromServer,
-        child: const Icon(Icons.refresh),
-      ),
     );
   }
 }
@@ -326,6 +371,7 @@ class SettingsPanel extends StatefulWidget {
   final String userMode;
   final Map<String, dynamic> symbolPrefs;
   final Function(String, Map<String, dynamic>) onLocalPrefsChanged;
+  final VoidCallback onSessionSettingsPressed;
 
   const SettingsPanel({
     super.key,
@@ -333,6 +379,7 @@ class SettingsPanel extends StatefulWidget {
     required this.userMode,
     required this.symbolPrefs,
     required this.onLocalPrefsChanged,
+    required this.onSessionSettingsPressed,
   });
 
   @override
@@ -383,24 +430,20 @@ class _SettingsPanelState extends State<SettingsPanel> {
           }
 
           return Padding(
-            padding:
-                EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
+            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const SizedBox(height: 8),
-                  Text(symbol,
-                      style:
-                          const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 8),
                   GridView.count(
                     crossAxisCount: 5,
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     children: timeframes.map((tf) {
-                      final isActive =
-                          (prefsForSymbol['timeframes'] as List<dynamic>).contains(tf);
+                      final isActive = (prefsForSymbol['timeframes'] as List<dynamic>).contains(tf);
                       return Padding(
                         padding: const EdgeInsets.all(4.0),
                         child: ElevatedButton(
@@ -417,12 +460,10 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   ),
                   Wrap(
                     spacing: 8,
-                    children: ['BUY', 'SELL', 'BUY&SELL'].map((pos) {
+                    children: ['BUY','SELL','BUY&SELL'].map((pos) {
                       final isActive = prefsForSymbol['direction'] == pos;
                       return ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                isActive ? Colors.green : Colors.red),
+                        style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
                         onPressed: () => _setDirection(pos),
                         child: Text(pos),
                       );
@@ -439,15 +480,13 @@ class _SettingsPanelState extends State<SettingsPanel> {
   }
 
   void _openModeSettings() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) {
-      return ModeSettingsPage(
-        initialMode: localMode,
-        onModeChanged: (newMode) async {
-          localMode = newMode;
-          await _saveAndNotify();
-        },
-      );
-    }));
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ModeSettingsPage(
+      initialMode: localMode,
+      onModeChanged: (newMode) async {
+        localMode = newMode;
+        await _saveAndNotify();
+      },
+    )));
   }
 
   @override
@@ -455,11 +494,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(8),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('تنظیمات کاربر',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -467,20 +502,27 @@ class _SettingsPanelState extends State<SettingsPanel> {
               return ElevatedButton(
                 onPressed: () => _openSymbolModal(s),
                 style: ElevatedButton.styleFrom(
-                  shape:
-                      RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: Text(s,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.bold)),
+                child: Text(s, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
               );
             }).toList(),
           ),
-          const SizedBox(height: 8),
-          ElevatedButton.icon(
-            onPressed: _openModeSettings,
-            icon: const Icon(Icons.tune),
-            label: const Text('Mode Settings'),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _openModeSettings,
+                icon: const Icon(Icons.tune),
+                label: const Text('Mode Settings'),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: widget.onSessionSettingsPressed,
+                icon: const Icon(Icons.access_time),
+                label: const Text('Session Settings'),
+              ),
+            ],
           ),
         ],
       ),
@@ -493,8 +535,7 @@ class ModeSettingsPage extends StatefulWidget {
   final String initialMode;
   final Function(String) onModeChanged;
 
-  const ModeSettingsPage(
-      {super.key, required this.initialMode, required this.onModeChanged});
+  const ModeSettingsPage({super.key, required this.initialMode, required this.onModeChanged});
 
   @override
   State<ModeSettingsPage> createState() => _ModeSettingsPageState();
@@ -507,13 +548,13 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
   @override
   void initState() {
     super.initState();
-    final bits = widget.initialMode.padRight(7, '0').substring(0, 7);
+    final bits = widget.initialMode.padRight(7, '0').substring(0,7);
     modeMap = {};
     modeMap['A1'] = bits[0] == '1';
     modeMap['A2'] = !modeMap['A1']!;
-    final otherKeys = ['B', 'C', 'D', 'E', 'F', 'G'];
+    final otherKeys = ['B','C','D','E','F','G'];
     for (int i = 0; i < otherKeys.length; i++) {
-      modeMap[otherKeys[i]] = bits.length > i + 1 ? bits[i + 1] == '1' : false;
+      modeMap[otherKeys[i]] = bits.length > i+1 ? bits[i+1] == '1' : false;
     }
   }
 
@@ -543,8 +584,8 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
         modeMap[key] = !(modeMap[key] ?? false);
       }
     });
-    final newMode = _build7BitString();
-    await widget.onModeChanged(newMode);
+    final modeStr = _build7BitString();
+    await widget.onModeChanged(modeStr);
   }
 
   @override
@@ -552,7 +593,7 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('Mode Settings')),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: GridView.count(
           crossAxisCount: 4,
           mainAxisSpacing: 8,
