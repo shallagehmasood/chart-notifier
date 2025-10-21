@@ -1,4 +1,4 @@
-// main.dart
+// lib/main.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -55,7 +55,7 @@ class _IntroPageState extends State<IntroPage> {
     super.initState();
     _controller = VideoPlayerController.asset('assets/a.mp4')
       ..initialize().then((_) {
-        setState(() {});
+        if (mounted) setState(() {});
         _controller.play();
       });
     _controller.addListener(() {
@@ -135,7 +135,7 @@ class _HomePageState extends State<HomePage> {
       saved = 'user_${DateTime.now().millisecondsSinceEpoch}';
       await prefs.setString('user_id', saved);
     }
-    setState(() => _userId = saved!);
+    if (mounted) setState(() => _userId = saved!);
   }
 
   Future<void> _initFirebase() async {
@@ -145,7 +145,9 @@ class _HomePageState extends State<HomePage> {
         await http.post(Uri.parse('$SERVER_URL/register'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'user_id': _userId, 'fcm_token': _fcmToken}));
-      } catch (_) {}
+      } catch (e) {
+        print('FCM register error: $e');
+      }
     }
     FirebaseMessaging.onMessage.listen((_) => _loadImagesFromServer());
     FirebaseMessaging.onMessageOpenedApp.listen((_) => _loadImagesFromServer());
@@ -156,13 +158,13 @@ class _HomePageState extends State<HomePage> {
     final mode = prefs.getString('mode_7bit') ?? '0000000';
     final symJson = prefs.getString('symbol_prefs') ?? '{}';
     final sessionJson = prefs.getString('session_prefs') ?? '{}';
-    setState(() {
+    if (mounted) setState(() {
       userMode = mode;
       symbolPrefs = jsonDecode(symJson);
       if(sessionJson.isNotEmpty){
         final Map<String,dynamic> s = jsonDecode(sessionJson);
         for(var k in s.keys){
-          sessionPrefs[k] = s[k];
+          sessionPrefs[k] = s[k] ?? false;
         }
       }
     });
@@ -173,6 +175,17 @@ class _HomePageState extends State<HomePage> {
     await prefs.setString('mode_7bit', userMode);
     await prefs.setString('symbol_prefs', jsonEncode(symbolPrefs));
     await prefs.setString('session_prefs', jsonEncode(sessionPrefs));
+
+    // ارسال به سرور
+    try {
+      await http.post(
+        Uri.parse('$SERVER_URL/update_symbol_prefs'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'symbol_prefs': symbolPrefs}),
+      );
+    } catch (e) {
+      print('Error sending symbol prefs: $e');
+    }
   }
 
   // ---------------- Session Settings ----------------
@@ -187,14 +200,14 @@ class _HomePageState extends State<HomePage> {
       );
 
       if (resp.statusCode == 200) {
-        setState(() => sessionPrefs[session] = newValue);
-        await _saveLocalPrefs();
+        if (mounted) setState(() => sessionPrefs[session] = newValue);
+        await _saveLocalPrefs(); // شامل sessionPrefs می‌شود
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('خطا در ثبت سشن. دوباره تلاش کنید')));
       }
     } catch (e) {
-      ScaffoldMessenger.of(context)
+      if (mounted) ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('خطا: $e')));
     }
   }
@@ -216,11 +229,7 @@ class _HomePageState extends State<HomePage> {
                     value: selected,
                     onChanged: (_) => _toggleSession(s),
                   ),
-                  title: Text(
-                    s,
-                    textAlign: TextAlign.right,
-                  ),
-                  onTap: () => _toggleSession(s),
+                  title: Text(s, textAlign: TextAlign.right),
                 );
               }).toList(),
             ),
@@ -243,7 +252,7 @@ class _HomePageState extends State<HomePage> {
           initialMode: userMode,
           userId: _userId,
           onModeChanged: (newMode) async {
-            setState(() => userMode = newMode);
+            if (mounted) setState(() => userMode = newMode);
             await _saveLocalPrefs();
             await _loadImagesFromServer();
           },
@@ -296,11 +305,13 @@ class _HomePageState extends State<HomePage> {
             'filename': img['filename'] ?? img['image_url'].split('/').last,
           };
         }).toList();
-        setState(() {
+        if (mounted) setState(() {
           _receivedImages = List<Map<String, dynamic>>.from(filtered);
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      print('Load images error: $e');
+    }
   }
 
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
@@ -310,16 +321,18 @@ class _HomePageState extends State<HomePage> {
       final resp = await http.get(Uri.parse(url));
       if (resp.statusCode == 200) {
         final bytes = resp.bodyBytes;
-        final directory = await getExternalStorageDirectory();
+        final directory = await getApplicationDocumentsDirectory();
         final filename = '${symbol}_${timeframe}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final file = File('${directory!.path}/$filename');
+        final file = File('${directory.path}/$filename');
         await file.writeAsBytes(bytes);
         if (mounted) {
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text('ذخیره شد: ${file.path}')));
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      print('Download error: $e');
+    }
   }
 
   Future<void> _deleteImageForUser(String url) async {
@@ -327,10 +340,12 @@ class _HomePageState extends State<HomePage> {
       await http.post(Uri.parse('$SERVER_URL/delete_image'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'user_id': _userId, 'image_url': url}));
-      setState(() {
+      if (mounted) setState(() {
         _receivedImages.removeWhere((i) => i['url'] == url);
       });
-    } catch (_) {}
+    } catch (e) {
+      print('Delete error: $e');
+    }
   }
 
   void _showImageFullScreen(String imageUrl, String filename) {
@@ -355,7 +370,7 @@ class _HomePageState extends State<HomePage> {
               userMode: userMode,
               symbolPrefs: symbolPrefs,
               onLocalPrefsChanged: (mode, prefs) async {
-                setState(() {
+                if (mounted) setState(() {
                   userMode = mode;
                   symbolPrefs = prefs;
                 });
@@ -588,8 +603,8 @@ class ModeSettingsPage extends StatefulWidget {
 class _ModeSettingsPageState extends State<ModeSettingsPage> {
   late Map<String, bool> modeMap;
   final List<Map<String, String>> modeItems = [
-    {'key': 'A1', 'label': 'همه هیدن‌ها'},
-    {'key': 'A2', 'label': 'هیدن اول'},
+    {'key': 'A1', 'label': 'هیدن اول'},
+    {'key': 'A2', 'label': 'همه هیدن ها'},
     {'key': 'B', 'label': 'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول1'},
     {'key': 'C', 'label': 'دایورجنس نبودن نقطه 2 در مکدی چهاربرابر'},
     {'key': 'D', 'label': 'زده شدن سقف یا کف جدید نسبت به 52 کندل قبل'},
@@ -649,14 +664,14 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
       );
 
       if (resp.statusCode == 200) {
-        setState(() => modeMap = newModeMap);
+        if (mounted) setState(() => modeMap = newModeMap);
         await widget.onModeChanged(newModeStr);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('خطا در ثبت مود. دوباره تلاش کنید')));
       }
     } catch (e) {
-      ScaffoldMessenger.of(context)
+      if (mounted) ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('خطا: $e')));
     }
   }
