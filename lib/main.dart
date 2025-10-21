@@ -24,6 +24,8 @@ final List<String> timeframes = [
   'M30','H1','H2','H3','H4','H6','H8','H12','D1','W1',
 ];
 
+final List<String> sessions = ['توکیو','لندن','نیویورک','سیدنی'];
+
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 }
@@ -57,22 +59,27 @@ class _IntroPageState extends State<IntroPage> {
         _controller.play();
       });
     _controller.addListener(() {
-      if (_controller.value.position >= _controller.value.duration) {
-        _goToHome();
+      if (_controller.value.position >=
+          _controller.value.duration - const Duration(milliseconds: 200)) {
+        if (mounted) _goToHome();
       }
     });
     Future.delayed(const Duration(seconds: 6), () {
       if (mounted) _goToHome();
     });
   }
+
   void _goToHome() {
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
+    Navigator.pushReplacement(
+        context, MaterialPageRoute(builder: (_) => const HomePage()));
   }
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -100,13 +107,13 @@ class _HomePageState extends State<HomePage> {
   String _fcmToken = '';
   String userMode = '0000000';
   Map<String, dynamic> symbolPrefs = {};
-  Map<String, bool> sessionPrefs = {
-    'Tokyo': false,
-    'London': false,
-    'New York': false,
-    'Sydney': false
-  };
   List<Map<String, dynamic>> _receivedImages = [];
+  Map<String,bool> sessionPrefs = {
+    'توکیو': false,
+    'لندن': false,
+    'نیویورک': false,
+    'سیدنی': false,
+  };
 
   @override
   void initState() {
@@ -148,11 +155,16 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     final mode = prefs.getString('mode_7bit') ?? '0000000';
     final symJson = prefs.getString('symbol_prefs') ?? '{}';
-    final sessJson = prefs.getString('session_prefs') ?? '{}';
+    final sessionJson = prefs.getString('session_prefs') ?? '{}';
     setState(() {
       userMode = mode;
       symbolPrefs = jsonDecode(symJson);
-      sessionPrefs = Map<String, bool>.from(jsonDecode(sessJson) ?? sessionPrefs);
+      if(sessionJson.isNotEmpty){
+        final Map<String,dynamic> s = jsonDecode(sessionJson);
+        for(var k in s.keys){
+          sessionPrefs[k] = s[k];
+        }
+      }
     });
   }
 
@@ -203,7 +215,7 @@ class _HomePageState extends State<HomePage> {
             'url': img['image_url'],
             'symbol': img['symbol'],
             'timeframe': img['timeframe'],
-            'filename': img['filename'] ?? _extractFilename(img['image_url']),
+            'filename': img['filename'] ?? img['image_url'].split('/').last,
           };
         }).toList();
         setState(() {
@@ -212,8 +224,6 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (_) {}
   }
-
-  String _extractFilename(String url) => url.split('/').last;
 
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
     var status = await Permission.storage.request();
@@ -226,7 +236,10 @@ class _HomePageState extends State<HomePage> {
         final filename = '${symbol}_${timeframe}_${DateTime.now().millisecondsSinceEpoch}.jpg';
         final file = File('${directory!.path}/$filename');
         await file.writeAsBytes(bytes);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved: ${file.path}')));
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('ذخیره شد: ${file.path}')));
+        }
       }
     } catch (e) {}
   }
@@ -251,111 +264,73 @@ class _HomePageState extends State<HomePage> {
     }));
   }
 
-  void _openSettingsPanel() {
+  void _openSessionModal() async {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (_) => SettingsPanel(
-        userMode: userMode,
-        symbolPrefs: symbolPrefs,
-        sessionPrefs: sessionPrefs,
-        onLocalPrefsChanged: (mode, prefs) async {
-          // ابتدا تغییرات را به سرور ارسال کن
-          final prevMode = userMode;
-          final prevPrefs = Map<String, dynamic>.from(symbolPrefs);
-          final prevSession = Map<String, bool>.from(sessionPrefs);
-          try {
-            final rsp = await http.post(
-              Uri.parse('$SERVER_URL/save_preferences'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'user_id': _userId,
-                'mode': mode,
-                'symbol_prefs': prefs,
-                'session_prefs': sessionPrefs
-              }),
-            );
-            if (rsp.statusCode == 200) {
-              setState(() {
-                userMode = mode;
-                symbolPrefs = prefs;
-              });
-              await _saveLocalPrefs();
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preferences saved')));
-            } else {
-              throw Exception('Server error');
-            }
-          } catch (e) {
-            // بازگردانی حالت قبلی
-            setState(() {
-              userMode = prevMode;
-              symbolPrefs = prevPrefs;
-              sessionPrefs = prevSession;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save preferences')));
-          }
-        },
-        onSessionPrefsChanged: (newSession) async {
-          final prevSession = Map<String, bool>.from(sessionPrefs);
-          try {
-            final rsp = await http.post(
-              Uri.parse('$SERVER_URL/save_preferences'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'user_id': _userId,
-                'mode': userMode,
-                'symbol_prefs': symbolPrefs,
-                'session_prefs': newSession
-              }),
-            );
-            if (rsp.statusCode == 200) {
-              setState(() {
-                sessionPrefs = newSession;
-              });
-              await _saveLocalPrefs();
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Session saved')));
-            } else {
-              throw Exception('Server error');
-            }
-          } catch (e) {
-            setState(() {
-              sessionPrefs = prevSession;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to save session')));
-          }
-        },
-      ),
+      builder: (_) {
+        return StatefulBuilder(builder: (contextModal,setModal){
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: sessions.map((s){
+                final selected = sessionPrefs[s] ?? false;
+                return ListTile(
+                  leading: Checkbox(
+                    value: selected,
+                    onChanged: (v){
+                      setModal(()=>sessionPrefs[s] = v ?? false);
+                      _saveLocalPrefs();
+                    },
+                  ),
+                  title: Text(s),
+                  onTap: (){
+                    setModal(()=>sessionPrefs[s] = !(sessionPrefs[s]??false));
+                    _saveLocalPrefs();
+                  },
+                );
+              }).toList(),
+            ),
+          );
+        });
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Center(child: Text('Amino_First_Hidden')),
-      ),
+      appBar: AppBar(title: const Text('Amino_First_Hidden')),
       body: Column(
         children: [
           Expanded(
             flex: 1,
             child: SettingsPanel(
+              userId: _userId,
               userMode: userMode,
               symbolPrefs: symbolPrefs,
-              sessionPrefs: sessionPrefs,
-              onLocalPrefsChanged: (m, s) async {},
-              onSessionPrefsChanged: (s) async {},
+              onLocalPrefsChanged: (mode, prefs) async {
+                setState(() {
+                  userMode = mode;
+                  symbolPrefs = prefs;
+                });
+                await _saveLocalPrefs();
+                await _loadImagesFromServer();
+              },
+              onSessionSettingsPressed: _openSessionModal,
             ),
           ),
-          Container(height: 1, color: Colors.grey), // خط وسط
           Expanded(
             flex: 1,
             child: _receivedImages.isEmpty
-                ? const Center(child: Text('??? ?????? ???? ????? ????'))
+                ? const Center(child: Text('هیچ تصویری موجود نیست'))
                 : ListView.builder(
                     itemCount: _receivedImages.length,
                     itemBuilder: (context, i) {
                       final img = _receivedImages[i];
                       return Card(
+                        margin: const EdgeInsets.all(6),
                         child: Column(
                           children: [
                             GestureDetector(
@@ -392,19 +367,19 @@ class _HomePageState extends State<HomePage> {
 
 // ---------- SettingsPanel ----------
 class SettingsPanel extends StatefulWidget {
+  final String userId;
   final String userMode;
   final Map<String, dynamic> symbolPrefs;
-  final Map<String, bool> sessionPrefs;
   final Function(String, Map<String, dynamic>) onLocalPrefsChanged;
-  final Function(Map<String, bool>) onSessionPrefsChanged;
+  final VoidCallback onSessionSettingsPressed;
 
   const SettingsPanel({
     super.key,
+    required this.userId,
     required this.userMode,
     required this.symbolPrefs,
-    required this.sessionPrefs,
     required this.onLocalPrefsChanged,
-    required this.onSessionPrefsChanged,
+    required this.onSessionSettingsPressed,
   });
 
   @override
@@ -414,160 +389,239 @@ class SettingsPanel extends StatefulWidget {
 class _SettingsPanelState extends State<SettingsPanel> {
   late String localMode;
   late Map<String, dynamic> localSymbolPrefs;
-  late Map<String, bool> localSessionPrefs;
-
-  final Map<String, String> modeOptionText = {
-    'A1': 'آن',
-    'A2': 'هیدن اول',
-    'B': 'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول1',
-    'C': 'دایورجنس نبودن نقطه 2 در مکدی چهاربرابر',
-    'D': 'زده شدن سقف یا کف جدید نسبت به 52 کندل قبل',
-    'E': 'عدم تناسب در نقطه 3 بین مکدی دیفالت و مووینگ60',
-    'F': 'از 2 تا 3 اصلاح مناسبی داشته باشد',
-    'G': 'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول2',
-  };
 
   @override
   void initState() {
     super.initState();
     localMode = widget.userMode;
     localSymbolPrefs = Map<String, dynamic>.from(widget.symbolPrefs);
-    localSessionPrefs = Map<String, bool>.from(widget.sessionPrefs);
   }
 
-  Future<void> _saveModeChanges() async {
+  Future<void> _saveAndNotify() async {
     await widget.onLocalPrefsChanged(localMode, localSymbolPrefs);
   }
 
-  Future<void> _saveSessionChanges() async {
-    await widget.onSessionPrefsChanged(localSessionPrefs);
-  }
-
-  void _openModeSettings() {
+  void _openSymbolModal(String symbol) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (_) {
-        return StatefulBuilder(
-          builder: (contextModal, setModal) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: modeOptionText.entries.map((entry) {
-                    final key = entry.key;
-                    final text = entry.value;
-                    final isChecked = localModePad()[key]!;
-                    return CheckboxListTile(
-                      title: Text(text),
-                      value: isChecked,
-                      onChanged: (val) async {
-                        setModal(() {
-                          _toggleMode(key);
-                        });
-                        await _saveModeChanges();
-                      },
-                    );
-                  }).toList(),
-                ),
+        final prefsForSymbol = Map<String, dynamic>.from(
+            localSymbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'});
+        return StatefulBuilder(builder: (contextModal, setModal) {
+          void _toggleTf(String tf) async {
+            final tfs = List<String>.from(prefsForSymbol['timeframes'] ?? []);
+            if (tfs.contains(tf)) {
+              tfs.remove(tf);
+            } else {
+              tfs.add(tf);
+            }
+            prefsForSymbol['timeframes'] = tfs;
+            localSymbolPrefs[symbol] = prefsForSymbol;
+            await _saveAndNotify();
+            setModal(() {});
+          }
+
+          void _setDirection(String dir) async {
+            prefsForSymbol['direction'] = dir;
+            localSymbolPrefs[symbol] = prefsForSymbol;
+            await _saveAndNotify();
+            setModal(() {});
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  const SizedBox(height: 8),
+                  GridView.count(
+                    crossAxisCount: 5,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: timeframes.map((tf) {
+                      final isActive = (prefsForSymbol['timeframes'] as List<dynamic>).contains(tf);
+                      return Padding(
+                        padding: const EdgeInsets.all(4.0),
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            shape: const CircleBorder(),
+                            padding: EdgeInsets.zero,
+                            backgroundColor: isActive ? Colors.green : Colors.red,
+                          ),
+                          onPressed: () => _toggleTf(tf),
+                          child: Text(tf, style: const TextStyle(fontSize: 11)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    children: ['BUY','SELL','BUY&SELL'].map((pos) {
+                      final isActive = prefsForSymbol['direction'] == pos;
+                      return ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
+                        onPressed: () => _setDirection(pos),
+                        child: Text(pos),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ),
-            );
-          },
-        );
+            ),
+          );
+        });
       },
     );
   }
 
-  void _openSessionSettings() {
-    showModalBottomSheet(
-      context: context,
-      builder: (_) {
-        return StatefulBuilder(
-          builder: (contextModal, setModal) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: localSessionPrefs.keys.map((sess) {
-                    return CheckboxListTile(
-                      title: Text(sess),
-                      value: localSessionPrefs[sess],
-                      onChanged: (val) async {
-                        setModal(() {
-                          localSessionPrefs[sess] = val ?? false;
-                        });
-                        await _saveSessionChanges();
-                      },
-                    );
-                  }).toList(),
-                ),
-              ),
-            );
-          },
-        );
+  void _openModeSettings() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ModeSettingsPage(
+      initialMode: localMode,
+      onModeChanged: (newMode) async {
+        localMode = newMode;
+        await _saveAndNotify();
       },
-    );
-  }
-
-  Map<String, bool> localModePad() {
-    // طول 7
-    final bits = localMode.padRight(7, '0').substring(0,7);
-    final map = <String, bool>{};
-    map['A1'] = bits[0]=='1';
-    map['A2'] = bits[1]=='1';
-    map['B'] = bits[2]=='1';
-    map['C'] = bits[3]=='1';
-    map['D'] = bits[4]=='1';
-    map['E'] = bits[5]=='1';
-    map['F'] = bits[6]=='1';
-    map['G'] = bits.length>7 ? bits[7]=='1':false;
-    return map;
-  }
-
-  void _toggleMode(String key) {
-    final modeMap = localModePad();
-    modeMap[key] = !(modeMap[key] ?? false);
-    // ساختن رشته 7 بیتی
-    final bits = [
-      modeMap['A1']! ? '1' : '0',
-      modeMap['A2']! ? '1' : '0',
-      modeMap['B']! ? '1' : '0',
-      modeMap['C']! ? '1' : '0',
-      modeMap['D']! ? '1' : '0',
-      modeMap['E']! ? '1' : '0',
-      modeMap['F']! ? '1' : '0',
-    ];
-    localMode = bits.join();
+    )));
   }
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(8),
       child: Column(
         children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: symbols.map((s) {
+              return ElevatedButton(
+                onPressed: () => _openSymbolModal(s),
+                style: ElevatedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Text(s, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Mode Settings'),
-                  onPressed: _openModeSettings,
-                ),
+              ElevatedButton.icon(
+                onPressed: _openModeSettings,
+                icon: const Icon(Icons.tune),
+                label: const Text('Mode Settings'),
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.settings),
-                  label: const Text('Session Settings'),
-                  onPressed: _openSessionSettings,
-                ),
+              ElevatedButton.icon(
+                onPressed: widget.onSessionSettingsPressed,
+                icon: const Icon(Icons.access_time),
+                label: const Text('Session Settings'),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------- ModeSettingsPage ----------
+// ---------- ModeSettingsBottomSheet ----------
+class ModeSettingsBottomSheet extends StatefulWidget {
+  final String initialMode;
+  final Function(String) onModeChanged;
+
+  const ModeSettingsBottomSheet({super.key, required this.initialMode, required this.onModeChanged});
+
+  @override
+  State<ModeSettingsBottomSheet> createState() => _ModeSettingsBottomSheetState();
+}
+
+class _ModeSettingsBottomSheetState extends State<ModeSettingsBottomSheet> {
+  late List<bool> modeValues;
+  final List<String> modeLabels = [
+    'همه هیدن ها',
+    'هیدن اول',
+    'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول1',
+    'دایورجنس نبودن نقطه 2 در مکدی چهاربرابر',
+    'زده شدن سقف یا کف جدید نسبت به 52کندل قبل',
+    'عدم تناسب در نقطه 3 بین مکدی دیفالت و مووینگ60',
+    'از 2 تا 3 اصلاح مناسبی داشته باشد',
+    'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول2',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    // پیش‌فرض همه خاموش
+    modeValues = List.generate(modeLabels.length, (_) => false);
+
+    // اعمال initialMode در صورت وجود (فقط 7 بیت اول)
+    final bits = widget.initialMode.padRight(7, '0').substring(0,7);
+    for (int i = 0; i < bits.length && i < modeValues.length; i++) {
+      modeValues[i] = bits[i] == '1';
+    }
+  }
+
+  String _build7BitString() {
+    final bits = modeValues.map((v) => v ? '1' : '0').toList();
+    return bits.join().substring(0,7);
+  }
+
+  void _toggleMode(int index) async {
+    setState(() {
+      modeValues[index] = !modeValues[index];
+    });
+    final modeStr = _build7BitString();
+    await widget.onModeChanged(modeStr);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          int columns = constraints.maxWidth ~/ 160;
+          columns = columns < 1 ? 1 : columns;
+
+          return SingleChildScrollView(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: List.generate(modeLabels.length, (index) {
+                final isActive = modeValues[index];
+                return SizedBox(
+                  width: (constraints.maxWidth - (columns - 1) * 8) / columns,
+                  child: ElevatedButton(
+                    onPressed: () => _toggleMode(index),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isActive ? Colors.green : Colors.red,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Text(
+                      modeLabels[index],
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                );
+              }),
+            ),
+          );
+        },
       ),
     );
   }
