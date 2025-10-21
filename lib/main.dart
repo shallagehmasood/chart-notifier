@@ -240,9 +240,6 @@ class _HomePageState extends State<HomePage> {
 
   // ---------- تابع دانلود تصویر ----------
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
-    ...
-
-  Future<void> _downloadImage(String url, String symbol, String timeframe) async {
     var status = await Permission.storage.request();
     if (!status.isGranted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Storage permission denied')));
