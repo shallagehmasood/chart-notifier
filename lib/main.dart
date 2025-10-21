@@ -323,7 +323,9 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Amino_First_Hidden')),
+appBar: AppBar(
+  title: const Text('Amino_First_Hidden'),centerTitle: true,),
+
       body: Column(
         children: [
           Expanded(
@@ -544,50 +546,75 @@ class _SettingsPanelState extends State<SettingsPanel> {
     );
   }
 }
-
-// ---------- ModeSettingsBottomSheet ----------
-class ModeSettingsBottomSheet extends StatefulWidget {
+// ---------- ModeSettingsPage ----------
+class ModeSettingsPage extends StatefulWidget {
   final String initialMode;
   final Function(String) onModeChanged;
 
-  const ModeSettingsBottomSheet({super.key, required this.initialMode, required this.onModeChanged});
+  const ModeSettingsPage({
+    super.key,
+    required this.initialMode,
+    required this.onModeChanged,
+  });
 
   @override
-  State<ModeSettingsBottomSheet> createState() => _ModeSettingsBottomSheetState();
+  State<ModeSettingsPage> createState() => _ModeSettingsPageState();
 }
 
-class _ModeSettingsBottomSheetState extends State<ModeSettingsBottomSheet> {
-  late List<bool> modeValues;
-  final List<String> modeLabels = [
-    'همه هیدن ها',
-    'هیدن اول',
-    'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول1',
-    'دایورجنس نبودن نقطه 2 در مکدی چهاربرابر',
-    'زده شدن سقف یا کف جدید نسبت به 52کندل قبل',
-    'عدم تناسب در نقطه 3 بین مکدی دیفالت و مووینگ60',
-    'از 2 تا 3 اصلاح مناسبی داشته باشد',
-    'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول2',
+class _ModeSettingsPageState extends State<ModeSettingsPage> {
+  late Map<String, bool> modeMap;
+  final List<Map<String, String>> modeItems = [
+    {'key': 'A1', 'label': 'همه هیدن‌ها'},
+    {'key': 'A2', 'label': 'هیدن اول'},
+    {'key': 'B', 'label': 'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول1'},
+    {'key': 'C', 'label': 'دایورجنس نبودن نقطه 2 در مکدی چهاربرابر'},
+    {'key': 'D', 'label': 'زده شدن سقف یا کف جدید نسبت به 52 کندل قبل'},
+    {'key': 'E', 'label': 'عدم تناسب در نقطه 3 بین مکدی دیفالت و مووینگ60'},
+    {'key': 'F', 'label': 'از 2 تا 3 اصلاح مناسبی داشته باشد'},
+    {'key': 'G', 'label': 'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول2'},
   ];
 
   @override
   void initState() {
     super.initState();
-    modeValues = List.generate(modeLabels.length, (_) => false);
-
-    final bits = widget.initialMode.padRight(7, '0').substring(0,7);
-    for (int i = 0; i < bits.length && i < modeValues.length; i++) {
-      modeValues[i] = bits[i] == '1';
-    }
+    final bits = widget.initialMode.padRight(7, '0').substring(0, 7);
+    modeMap = {
+      'A1': bits[0] == '1',
+      'A2': bits[0] == '0', // اگر A1 فعال نباشد، A2 فعال می‌شود
+      'B': bits[1] == '1',
+      'C': bits[2] == '1',
+      'D': bits[3] == '1',
+      'E': bits[4] == '1',
+      'F': bits[5] == '1',
+      'G': bits[6] == '1',
+    };
   }
 
   String _build7BitString() {
-    final bits = modeValues.map((v) => v ? '1' : '0').toList();
-    return bits.join().substring(0,7);
+    final a1 = modeMap['A1']! ? '1' : '0';
+    final bits = [
+      a1,
+      modeMap['B']! ? '1' : '0',
+      modeMap['C']! ? '1' : '0',
+      modeMap['D']! ? '1' : '0',
+      modeMap['E']! ? '1' : '0',
+      modeMap['F']! ? '1' : '0',
+      modeMap['G']! ? '1' : '0',
+    ];
+    return bits.join();
   }
 
-  void _toggleMode(int index) async {
+  Future<void> _toggleMode(String key, bool value) async {
     setState(() {
-      modeValues[index] = !modeValues[index];
+      if (key == 'A1') {
+        modeMap['A1'] = value;
+        modeMap['A2'] = !value;
+      } else if (key == 'A2') {
+        modeMap['A2'] = value;
+        modeMap['A1'] = !value;
+      } else {
+        modeMap[key] = value;
+      }
     });
     final modeStr = _build7BitString();
     await widget.onModeChanged(modeStr);
@@ -595,45 +622,34 @@ class _ModeSettingsBottomSheetState extends State<ModeSettingsBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          int columns = constraints.maxWidth ~/ 160;
-          columns = columns < 1 ? 1 : columns;
-
-          return SingleChildScrollView(
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: List.generate(modeLabels.length, (index) {
-                final isActive = modeValues[index];
-                return SizedBox(
-                  width: (constraints.maxWidth - (columns - 1) * 8) / columns,
-                  child: ElevatedButton(
-                    onPressed: () => _toggleMode(index),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isActive ? Colors.green : Colors.red,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    child: Text(
-                      modeLabels[index],
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                );
-              }),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            const Text(
+              'تنظیمات مود',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-          );
-        },
+            const Divider(),
+            ...modeItems.map((item) {
+              final key = item['key']!;
+              final label = item['label']!;
+              return CheckboxListTile(
+                title: Text(label, textAlign: TextAlign.right),
+                value: modeMap[key],
+                onChanged: (v) {
+                  _toggleMode(key, v ?? false);
+                },
+              );
+            }),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
