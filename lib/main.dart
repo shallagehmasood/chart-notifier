@@ -215,6 +215,32 @@ class _HomePageState extends State<HomePage> {
       return url;
     }
   }
+  // ---------- Helpers برای فیلتر نمایش تصویر ----------
+  bool _shouldDisplayImageForUser(Map<String, dynamic> img) {
+    final code = img['code_8bit'] ?? '00000000';
+    if (code.length < 8) return false;
+
+    // بیت 0 = جهت BUY/SELL
+    final direction = symbolPrefs[img['symbol']]?['direction'] ?? 'BUY&SELL';
+    if (direction == 'BUY' && code[0] != '0') return false;
+    if (direction == 'SELL' && code[0] != '1') return false;
+    // اگر BUY&SELL باشد، اهمیتی ندارد
+
+    // بیت‌های 1 تا 7 بر اساس userMode (تنظیم کاربر)
+    for (int i = 0; i < 7; i++) {
+      final userBit = userMode[i];
+      final imgBit = code[i + 1];
+      // اگر کاربر بیت را 1 انتخاب کرده ولی در تصویر 0 است → رد
+      if (userBit == '1' && imgBit != '1') return false;
+      // اگر کاربر بیت را 0 انتخاب کرده → هر دو حالت قابل قبول است
+    }
+
+    return true;
+  }
+
+  // ---------- تابع دانلود تصویر ----------
+  Future<void> _downloadImage(String url, String symbol, String timeframe) async {
+    ...
 
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
     var status = await Permission.storage.request();
