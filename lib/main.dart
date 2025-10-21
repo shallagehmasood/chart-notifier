@@ -155,19 +155,62 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadLocalPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final mode = prefs.getString('mode_7bit') ?? '0000000';
-    final symJson = prefs.getString('symbol_prefs') ?? '{}';
-    final sessionJson = prefs.getString('session_prefs') ?? '{}';
-    if (mounted) setState(() {
-      userMode = mode;
-      symbolPrefs = jsonDecode(symJson);
-      if(sessionJson.isNotEmpty){
-        final Map<String,dynamic> s = jsonDecode(sessionJson);
-        for(var k in s.keys){
+    
+    bool hasLocalMode = prefs.containsKey('mode_7bit');
+    bool hasLocalSymbols = prefs.containsKey('symbol_prefs');
+    bool hasLocalSessions = prefs.containsKey('session_prefs');
+
+    if (hasLocalMode && hasLocalSymbols && hasLocalSessions) {
+      final mode = prefs.getString('mode_7bit') ?? '0000000';
+      final symJson = prefs.getString('symbol_prefs') ?? '{}';
+      final sessionJson = prefs.getString('session_prefs') ?? '{}';
+      
+      if (mounted) setState(() {
+        userMode = mode;
+        symbolPrefs = jsonDecode(symJson);
+        final Map<String, dynamic> s = jsonDecode(sessionJson);
+        for (var k in s.keys) {
           sessionPrefs[k] = s[k] ?? false;
         }
+      });
+    } else {
+      await _loadPrefsFromServer();
+    }
+  }
+
+  Future<void> _loadPrefsFromServer() async {
+    try {
+      final rsp = await http.post(
+        Uri.parse('$SERVER_URL/get_user_prefs'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId}),
+      );
+      
+      if (rsp.statusCode == 200) {
+        final data = jsonDecode(rsp.body);
+        String mode = data['mode'] ?? '0000000';
+        Map<String, dynamic> symbols = data['symbol_prefs'] ?? {};
+        Map<String, dynamic> sessions = data['sessions'] ?? {};
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('mode_7bit', mode);
+        await prefs.setString('symbol_prefs', jsonEncode(symbols));
+        await prefs.setString('session_prefs', jsonEncode(sessions));
+
+        if (mounted) setState(() {
+          userMode = mode;
+          symbolPrefs = symbols;
+          for (var session in this.sessionPrefs.keys.toList()) {
+            this.sessionPrefs[session] = sessions[session] == true;
+          }
+        });
+      } else {
+        await _saveLocalPrefs();
       }
-    });
+    } catch (e) {
+      print('Load prefs from server error: $e');
+      await _saveLocalPrefs();
+    }
   }
 
   Future<void> _saveLocalPrefs() async {
@@ -176,15 +219,25 @@ class _HomePageState extends State<HomePage> {
     await prefs.setString('symbol_prefs', jsonEncode(symbolPrefs));
     await prefs.setString('session_prefs', jsonEncode(sessionPrefs));
 
-    // ارسال به سرور
+    // ارسال همه تنظیمات به سرور
     try {
+      await http.post(
+        Uri.parse('$SERVER_URL/update_mode'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'mode': userMode}),
+      );
+      await http.post(
+        Uri.parse('$SERVER_URL/update_session_prefs'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'sessions': sessionPrefs}),
+      );
       await http.post(
         Uri.parse('$SERVER_URL/update_symbol_prefs'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': _userId, 'symbol_prefs': symbolPrefs}),
       );
     } catch (e) {
-      print('Error sending symbol prefs: $e');
+      print('Error saving prefs to server: $e');
     }
   }
 
@@ -200,8 +253,9 @@ class _HomePageState extends State<HomePage> {
       );
 
       if (resp.statusCode == 200) {
-        if (mounted) setState(() => sessionPrefs[session] = newValue);
-        await _saveLocalPrefs(); // شامل sessionPrefs می‌شود
+        sessionPrefs[session] = newValue;
+        await _saveLocalPrefs();
+        if (mounted) setState(() {});
       } else {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('خطا در ثبت سشن. دوباره تلاش کنید')));
@@ -603,8 +657,8 @@ class ModeSettingsPage extends StatefulWidget {
 class _ModeSettingsPageState extends State<ModeSettingsPage> {
   late Map<String, bool> modeMap;
   final List<Map<String, String>> modeItems = [
-    {'key': 'A1', 'label': 'همه هیدن ها'},
-    {'key': 'A2', 'label': 'هیدن اول'},
+    {'key': 'A1', 'label': 'هیدن اول'},
+    {'key': 'A2', 'label': 'همه هیدن ها'},
     {'key': 'B', 'label': 'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول1'},
     {'key': 'C', 'label': 'دایورجنس نبودن نقطه 2 در مکدی چهاربرابر'},
     {'key': 'D', 'label': 'زده شدن سقف یا کف جدید نسبت به 52 کندل قبل'},
@@ -642,16 +696,17 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
     ].join();
   }
 
-  Future<void> _toggleMode(String key, bool value) async {
+  Future<void> _toggleMode(String key, bool newValue) async {
     final newModeMap = Map<String, bool>.from(modeMap);
+
     if (key == 'A1') {
-      newModeMap['A1'] = !value;
-      newModeMap['A2'] = value;
+      newModeMap['A1'] = newValue;
+      newModeMap['A2'] = !newValue;
     } else if (key == 'A2') {
-      newModeMap['A2'] = !value;
-      newModeMap['A1'] = value;
+      newModeMap['A2'] = newValue;
+      newModeMap['A1'] = !newValue;
     } else {
-      newModeMap[key] = value;
+      newModeMap[key] = newValue;
     }
 
     final newModeStr = _build7BitStringFromMap(newModeMap);
