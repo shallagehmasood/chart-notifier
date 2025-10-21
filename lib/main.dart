@@ -298,6 +298,28 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openModeSettings() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return ModeSettingsBottomSheet(
+          initialMode: userMode,
+          onModeChanged: (newMode) async {
+            setState(() {
+              userMode = newMode;
+            });
+            await _saveLocalPrefs();
+            await _loadImagesFromServer();
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -319,6 +341,7 @@ class _HomePageState extends State<HomePage> {
                 await _loadImagesFromServer();
               },
               onSessionSettingsPressed: _openSessionModal,
+              onModeSettingsPressed: _openModeSettings,
             ),
           ),
           Expanded(
@@ -372,6 +395,7 @@ class SettingsPanel extends StatefulWidget {
   final Map<String, dynamic> symbolPrefs;
   final Function(String, Map<String, dynamic>) onLocalPrefsChanged;
   final VoidCallback onSessionSettingsPressed;
+  final VoidCallback onModeSettingsPressed;
 
   const SettingsPanel({
     super.key,
@@ -380,6 +404,7 @@ class SettingsPanel extends StatefulWidget {
     required this.symbolPrefs,
     required this.onLocalPrefsChanged,
     required this.onSessionSettingsPressed,
+    required this.onModeSettingsPressed,
   });
 
   @override
@@ -479,16 +504,6 @@ class _SettingsPanelState extends State<SettingsPanel> {
     );
   }
 
-  void _openModeSettings() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => ModeSettingsPage(
-      initialMode: localMode,
-      onModeChanged: (newMode) async {
-        localMode = newMode;
-        await _saveAndNotify();
-      },
-    )));
-  }
-
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -512,7 +527,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           Row(
             children: [
               ElevatedButton.icon(
-                onPressed: _openModeSettings,
+                onPressed: widget.onModeSettingsPressed,
                 icon: const Icon(Icons.tune),
                 label: const Text('Mode Settings'),
               ),
@@ -530,7 +545,6 @@ class _SettingsPanelState extends State<SettingsPanel> {
   }
 }
 
-// ---------- ModeSettingsPage ----------
 // ---------- ModeSettingsBottomSheet ----------
 class ModeSettingsBottomSheet extends StatefulWidget {
   final String initialMode;
@@ -558,10 +572,8 @@ class _ModeSettingsBottomSheetState extends State<ModeSettingsBottomSheet> {
   @override
   void initState() {
     super.initState();
-    // پیش‌فرض همه خاموش
     modeValues = List.generate(modeLabels.length, (_) => false);
 
-    // اعمال initialMode در صورت وجود (فقط 7 بیت اول)
     final bits = widget.initialMode.padRight(7, '0').substring(0,7);
     for (int i = 0; i < bits.length && i < modeValues.length; i++) {
       modeValues[i] = bits[i] == '1';
