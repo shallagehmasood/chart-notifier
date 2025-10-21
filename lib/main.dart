@@ -175,6 +175,84 @@ class _HomePageState extends State<HomePage> {
     await prefs.setString('session_prefs', jsonEncode(sessionPrefs));
   }
 
+  // ---------------- Session Settings ----------------
+  void _toggleSession(String session) async {
+    final newValue = !(sessionPrefs[session] ?? false);
+
+    try {
+      final resp = await http.post(
+        Uri.parse('$SERVER_URL/update_session'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'session': session, 'value': newValue}),
+      );
+
+      if (resp.statusCode == 200) {
+        setState(() => sessionPrefs[session] = newValue);
+        await _saveLocalPrefs();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('خطا در ثبت سشن. دوباره تلاش کنید')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('خطا: $e')));
+    }
+  }
+
+  void _openSessionModal() async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) {
+        return StatefulBuilder(builder: (contextModal,setModal){
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: sessions.map((s){
+                final selected = sessionPrefs[s] ?? false;
+                return ListTile(
+                  trailing: Checkbox(
+                    value: selected,
+                    onChanged: (_) => _toggleSession(s),
+                  ),
+                  title: Text(
+                    s,
+                    textAlign: TextAlign.right,
+                  ),
+                  onTap: () => _toggleSession(s),
+                );
+              }).toList(),
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  // ---------------- Mode Settings ----------------
+  void _openModeSettings() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return ModeSettingsPage(
+          initialMode: userMode,
+          userId: _userId,
+          onModeChanged: (newMode) async {
+            setState(() => userMode = newMode);
+            await _saveLocalPrefs();
+            await _loadImagesFromServer();
+          },
+        );
+      },
+    );
+  }
+
+  // ---------------- Symbol & Image Handling ----------------
   bool _shouldDisplayImageForUser(Map<String, dynamic> image) {
     final code = (image['code_8bit'] ?? '') as String;
     final sym = (image['symbol'] ?? '') as String;
@@ -264,72 +342,10 @@ class _HomePageState extends State<HomePage> {
     }));
   }
 
-  void _openSessionModal() async {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) {
-        return StatefulBuilder(builder: (contextModal,setModal){
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: sessions.map((s){
-                final selected = sessionPrefs[s] ?? false;
-                return ListTile(
-                  trailing: Checkbox(
-                    value: selected,
-                    onChanged: (v){
-                      setModal(()=>sessionPrefs[s] = v ?? false);
-                      _saveLocalPrefs();
-                    },
-                  ),
-                  title: Text(
-                    s,
-                    textAlign: TextAlign.right, // راست‌چین کردن متن
-                  ),
-                  onTap: (){
-                    setModal(()=>sessionPrefs[s] = !(sessionPrefs[s]??false));
-                    _saveLocalPrefs();
-                  },
-                );
-              }).toList(),
-            ),
-          );
-        });
-      },
-    );
-  }
-
-  void _openModeSettings() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return ModeSettingsPage(
-          initialMode: userMode,
-          onModeChanged: (newMode) async {
-            setState(() {
-              userMode = newMode;
-            });
-            await _saveLocalPrefs();
-            await _loadImagesFromServer();
-          },
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Amino_First_Hidden'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Amino_First_Hidden'), centerTitle: true),
       body: Column(
         children: [
           Expanded(
@@ -555,12 +571,14 @@ class _SettingsPanelState extends State<SettingsPanel> {
 // ---------- ModeSettingsPage ----------
 class ModeSettingsPage extends StatefulWidget {
   final String initialMode;
+  final String userId;
   final Function(String) onModeChanged;
 
   const ModeSettingsPage({
     super.key,
     required this.initialMode,
     required this.onModeChanged,
+    required this.userId,
   });
 
   @override
@@ -596,51 +614,63 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
     };
   }
 
-  String _build7BitString() {
-    final a1 = modeMap['A1']! ? '1' : '0';
-    final bits = [
+  String _build7BitStringFromMap(Map<String, bool> map) {
+    final a1 = map['A1']! ? '1' : '0';
+    return [
       a1,
-      modeMap['B']! ? '1' : '0',
-      modeMap['C']! ? '1' : '0',
-      modeMap['D']! ? '1' : '0',
-      modeMap['E']! ? '1' : '0',
-      modeMap['F']! ? '1' : '0',
-      modeMap['G']! ? '1' : '0',
-    ];
-    return bits.join();
+      map['B']! ? '1' : '0',
+      map['C']! ? '1' : '0',
+      map['D']! ? '1' : '0',
+      map['E']! ? '1' : '0',
+      map['F']! ? '1' : '0',
+      map['G']! ? '1' : '0',
+    ].join();
   }
 
   Future<void> _toggleMode(String key, bool value) async {
-    setState(() {
-      if (key == 'A1') {
-        modeMap['A1'] = value;
-        modeMap['A2'] = !value;
-      } else if (key == 'A2') {
-        modeMap['A2'] = value;
-        modeMap['A1'] = !value;
+    final newModeMap = Map<String, bool>.from(modeMap);
+    if (key == 'A1') {
+      newModeMap['A1'] = value;
+      newModeMap['A2'] = !value;
+    } else if (key == 'A2') {
+      newModeMap['A2'] = value;
+      newModeMap['A1'] = !value;
+    } else {
+      newModeMap[key] = value;
+    }
+
+    final newModeStr = _build7BitStringFromMap(newModeMap);
+
+    try {
+      final resp = await http.post(
+        Uri.parse('$SERVER_URL/update_mode'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': widget.userId, 'mode': newModeStr}),
+      );
+
+      if (resp.statusCode == 200) {
+        setState(() => modeMap = newModeMap);
+        await widget.onModeChanged(newModeStr);
       } else {
-        modeMap[key] = value;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('خطا در ثبت مود. دوباره تلاش کنید')));
       }
-    });
-    final modeStr = _build7BitString();
-    await widget.onModeChanged(modeStr);
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('خطا: $e')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 12),
-            const Text(
-              'تنظیمات مود',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            const Text('تنظیمات مود', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const Divider(),
             ...modeItems.map((item) {
               final key = item['key']!;
@@ -651,7 +681,7 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
                 onChanged: (v) {
                   _toggleMode(key, v ?? false);
                 },
-                controlAffinity: ListTileControlAffinity.trailing, // تیک سمت راست
+                controlAffinity: ListTileControlAffinity.trailing,
               );
             }),
             const SizedBox(height: 20),
