@@ -603,8 +603,8 @@ class ModeSettingsPage extends StatefulWidget {
 class _ModeSettingsPageState extends State<ModeSettingsPage> {
   late Map<String, bool> modeMap;
   final List<Map<String, String>> modeItems = [
-    {'key': 'A1', 'label': 'هیدن اول'},
-    {'key': 'A2', 'label': 'همه هیدن ها'},
+    {'key': 'A1', 'label': 'همه هیدن ها'},
+    {'key': 'A2', 'label': 'هیدن اول'},
     {'key': 'B', 'label': 'دایورجنس نبودن نقطه 2 در مکدی دیفالت لول1'},
     {'key': 'C', 'label': 'دایورجنس نبودن نقطه 2 در مکدی چهاربرابر'},
     {'key': 'D', 'label': 'زده شدن سقف یا کف جدید نسبت به 52 کندل قبل'},
