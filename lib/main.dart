@@ -630,11 +630,11 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
   Future<void> _toggleMode(String key, bool value) async {
     final newModeMap = Map<String, bool>.from(modeMap);
     if (key == 'A1') {
-      newModeMap['A1'] = value;
-      newModeMap['A2'] = !value;
-    } else if (key == 'A2') {
-      newModeMap['A2'] = value;
       newModeMap['A1'] = !value;
+      newModeMap['A2'] = value;
+    } else if (key == 'A2') {
+      newModeMap['A2'] = !value;
+      newModeMap['A1'] = value;
     } else {
       newModeMap[key] = value;
     }
