@@ -11,7 +11,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
-const String SERVER_URL = 'http://178.63.171.244:5000';
+// ⚠️ حتماً آی‌پی کامپیوترت رو جایگزین کن!
+const String SERVER_URL = 'http://178.63.171.244:5000'; // ← اینجا آی‌پی واقعیت رو بذار
 
 final List<String> symbols = [
   'EURUSD','XAUUSD','GBPUSD','USDJPY','USDCHF',
@@ -108,7 +109,7 @@ class _HomePageState extends State<HomePage> {
   String userMode = '0000000';
   Map<String, dynamic> symbolPrefs = {};
   List<Map<String, dynamic>> _receivedImages = [];
-  Map<String,bool> sessionPrefs = {
+  Map<String, bool> sessionPrefs = {
     'توکیو': false,
     'لندن': false,
     'نیویورک': false,
@@ -155,7 +156,6 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _loadLocalPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    
     bool hasLocalMode = prefs.containsKey('mode_7bit');
     bool hasLocalSymbols = prefs.containsKey('symbol_prefs');
     bool hasLocalSessions = prefs.containsKey('session_prefs');
@@ -164,136 +164,104 @@ class _HomePageState extends State<HomePage> {
       final mode = prefs.getString('mode_7bit') ?? '0000000';
       final symJson = prefs.getString('symbol_prefs') ?? '{}';
       final sessionJson = prefs.getString('session_prefs') ?? '{}';
-      
+
       if (mounted) setState(() {
         userMode = mode;
         symbolPrefs = jsonDecode(symJson);
         final Map<String, dynamic> s = jsonDecode(sessionJson);
         for (var k in s.keys) {
-          sessionPrefs[k] = s[k] ?? false;
+          sessionPrefs[k] = s[k] == true;
         }
       });
     } else {
-      await _loadPrefsFromServer();
+      await _savePrefsLocally();
     }
   }
 
-  Future<void> _loadPrefsFromServer() async {
-    try {
-      final rsp = await http.post(
-        Uri.parse('$SERVER_URL/get_user_prefs'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_id': _userId}),
-      );
-      
-      if (rsp.statusCode == 200) {
-        final data = jsonDecode(rsp.body);
-        String mode = data['mode'] ?? '0000000';
-        Map<String, dynamic> symbols = data['symbol_prefs'] ?? {};
-        Map<String, dynamic> sessions = data['sessions'] ?? {};
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('mode_7bit', mode);
-        await prefs.setString('symbol_prefs', jsonEncode(symbols));
-        await prefs.setString('session_prefs', jsonEncode(sessions));
-
-        if (mounted) setState(() {
-          userMode = mode;
-          symbolPrefs = symbols;
-          for (var session in this.sessionPrefs.keys.toList()) {
-            this.sessionPrefs[session] = sessions[session] == true;
-          }
-        });
-      } else {
-        await _saveLocalPrefs();
-      }
-    } catch (e) {
-      print('Load prefs from server error: $e');
-      await _saveLocalPrefs();
-    }
-  }
-
-  Future<void> _saveLocalPrefs() async {
+  Future<void> _savePrefsLocally() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('mode_7bit', userMode);
     await prefs.setString('symbol_prefs', jsonEncode(symbolPrefs));
     await prefs.setString('session_prefs', jsonEncode(sessionPrefs));
-
-    // ارسال همه تنظیمات به سرور
-    try {
-      await http.post(
-        Uri.parse('$SERVER_URL/update_mode'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_id': _userId, 'mode': userMode}),
-      );
-      await http.post(
-        Uri.parse('$SERVER_URL/update_session_prefs'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_id': _userId, 'sessions': sessionPrefs}),
-      );
-      await http.post(
-        Uri.parse('$SERVER_URL/update_symbol_prefs'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_id': _userId, 'symbol_prefs': symbolPrefs}),
-      );
-    } catch (e) {
-      print('Error saving prefs to server: $e');
-    }
   }
 
   // ---------------- Session Settings ----------------
-  void _toggleSession(String session) async {
-    final newValue = !(sessionPrefs[session] ?? false);
-
+  Future<void> _toggleSessionConfirmed(String session, bool newValue) async {
     try {
       final resp = await http.post(
         Uri.parse('$SERVER_URL/update_session'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'user_id': _userId, 'session': session, 'value': newValue}),
       );
-
       if (resp.statusCode == 200) {
         sessionPrefs[session] = newValue;
-        await _saveLocalPrefs();
+        await _savePrefsLocally();
         if (mounted) setState(() {});
       } else {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('خطا در ثبت سشن. دوباره تلاش کنید')));
+          const SnackBar(content: Text('خطا در ثبت سشن. دوباره تلاش کنید.')),
+        );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('خطا: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('اتصال به سرور برقرار نشد: $e')),
+      );
     }
   }
 
-  void _openSessionModal() async {
+  void _openSessionModal() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (_) {
-        return StatefulBuilder(builder: (contextModal,setModal){
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: sessions.map((s){
-                final selected = sessionPrefs[s] ?? false;
-                return ListTile(
-                  trailing: Checkbox(
-                    value: selected,
-                    onChanged: (_) => _toggleSession(s),
-                  ),
-                  title: Text(s, textAlign: TextAlign.right),
-                );
-              }).toList(),
-            ),
-          );
-        });
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: sessions.map((s) {
+              final selected = sessionPrefs[s] ?? false;
+              return ListTile(
+                trailing: Checkbox(
+                  value: selected,
+                  onChanged: (newValue) {
+                    if (newValue != null) {
+                      _toggleSessionConfirmed(s, newValue);
+                    }
+                  },
+                ),
+                title: Text(s, textAlign: TextAlign.right),
+              );
+            }).toList(),
+          ),
+        );
       },
     );
   }
 
   // ---------------- Mode Settings ----------------
+  Future<void> _updateModeConfirmed(String newMode) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$SERVER_URL/update_mode'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'mode': newMode}),
+      );
+      if (resp.statusCode == 200) {
+        userMode = newMode;
+        await _savePrefsLocally();
+        if (mounted) setState(() {});
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('خطا در ثبت مود. دوباره تلاش کنید.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('اتصال به سرور برقرار نشد: $e')),
+      );
+    }
+  }
+
   void _openModeSettings() {
     showModalBottomSheet(
       context: context,
@@ -305,11 +273,7 @@ class _HomePageState extends State<HomePage> {
         return ModeSettingsPage(
           initialMode: userMode,
           userId: _userId,
-          onModeChanged: (newMode) async {
-            if (mounted) setState(() => userMode = newMode);
-            await _saveLocalPrefs();
-            await _loadImagesFromServer();
-          },
+          onModeChanged: _updateModeConfirmed,
         );
       },
     );
@@ -342,64 +306,25 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadImagesFromServer() async {
-    try {
-      final rsp = await http.post(
-        Uri.parse('$SERVER_URL/images_for_user'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'user_id': _userId}),
-      );
-      if (rsp.statusCode == 200) {
-        final data = jsonDecode(rsp.body);
-        final List imgs = data['images'] ?? [];
-        final filtered = imgs.where((img) => _shouldDisplayImageForUser(img)).map((img) {
-          return {
-            'url': img['image_url'],
-            'symbol': img['symbol'],
-            'timeframe': img['timeframe'],
-            'filename': img['filename'] ?? img['image_url'].split('/').last,
-          };
-        }).toList();
-        if (mounted) setState(() {
-          _receivedImages = List<Map<String, dynamic>>.from(filtered);
-        });
-      }
-    } catch (e) {
-      print('Load images error: $e');
-    }
+    // برای حالا خالی برمی‌گردونیم — بعداً پیاده‌سازی می‌شه
+    if (mounted) setState(() {
+      _receivedImages = [];
+    });
   }
 
   Future<void> _downloadImage(String url, String symbol, String timeframe) async {
     var status = await Permission.storage.request();
     if (!status.isGranted) return;
-    try {
-      final resp = await http.get(Uri.parse(url));
-      if (resp.statusCode == 200) {
-        final bytes = resp.bodyBytes;
-        final directory = await getApplicationDocumentsDirectory();
-        final filename = '${symbol}_${timeframe}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final file = File('${directory.path}/$filename');
-        await file.writeAsBytes(bytes);
-        if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('ذخیره شد: ${file.path}')));
-        }
-      }
-    } catch (e) {
-      print('Download error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('ذخیره شد (شبیه‌سازی دانلود)')));
     }
   }
 
   Future<void> _deleteImageForUser(String url) async {
-    try {
-      await http.post(Uri.parse('$SERVER_URL/delete_image'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'user_id': _userId, 'image_url': url}));
-      if (mounted) setState(() {
-        _receivedImages.removeWhere((i) => i['url'] == url);
-      });
-    } catch (e) {
-      print('Delete error: $e');
-    }
+    if (mounted) setState(() {
+      _receivedImages.removeWhere((i) => i['url'] == url);
+    });
   }
 
   void _showImageFullScreen(String imageUrl, String filename) {
@@ -409,6 +334,29 @@ class _HomePageState extends State<HomePage> {
         body: PhotoView(imageProvider: NetworkImage(imageUrl)),
       );
     }));
+  }
+
+  Future<void> _updateSymbolPrefConfirmed(String symbol, Map<String, dynamic> prefs) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$SERVER_URL/update_symbol_pref'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': _userId, 'symbol': symbol, 'prefs': prefs}),
+      );
+      if (resp.statusCode == 200) {
+        symbolPrefs[symbol] = prefs;
+        await _savePrefsLocally();
+        if (mounted) setState(() {});
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('خطا در ثبت تنظیمات نماد. دوباره تلاش کنید.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('اتصال به سرور برقرار نشد: $e')),
+      );
+    }
   }
 
   @override
@@ -423,16 +371,9 @@ class _HomePageState extends State<HomePage> {
               userId: _userId,
               userMode: userMode,
               symbolPrefs: symbolPrefs,
-              onLocalPrefsChanged: (mode, prefs) async {
-                if (mounted) setState(() {
-                  userMode = mode;
-                  symbolPrefs = prefs;
-                });
-                await _saveLocalPrefs();
-                await _loadImagesFromServer();
-              },
               onSessionSettingsPressed: _openSessionModal,
               onModeSettingsPressed: _openModeSettings,
+              onSymbolPrefChanged: _updateSymbolPrefConfirmed,
             ),
           ),
           const Divider(thickness: 2, color: Colors.grey, height: 0),
@@ -485,18 +426,18 @@ class SettingsPanel extends StatefulWidget {
   final String userId;
   final String userMode;
   final Map<String, dynamic> symbolPrefs;
-  final Function(String, Map<String, dynamic>) onLocalPrefsChanged;
   final VoidCallback onSessionSettingsPressed;
   final VoidCallback onModeSettingsPressed;
+  final Future<void> Function(String symbol, Map<String, dynamic> prefs) onSymbolPrefChanged;
 
   const SettingsPanel({
     super.key,
     required this.userId,
     required this.userMode,
     required this.symbolPrefs,
-    required this.onLocalPrefsChanged,
     required this.onSessionSettingsPressed,
     required this.onModeSettingsPressed,
+    required this.onSymbolPrefChanged,
   });
 
   @override
@@ -504,46 +445,32 @@ class SettingsPanel extends StatefulWidget {
 }
 
 class _SettingsPanelState extends State<SettingsPanel> {
-  late String localMode;
-  late Map<String, dynamic> localSymbolPrefs;
-
-  @override
-  void initState() {
-    super.initState();
-    localMode = widget.userMode;
-    localSymbolPrefs = Map<String, dynamic>.from(widget.symbolPrefs);
-  }
-
-  Future<void> _saveAndNotify() async {
-    await widget.onLocalPrefsChanged(localMode, localSymbolPrefs);
-  }
-
   void _openSymbolModal(String symbol) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (_) {
-        final prefsForSymbol = Map<String, dynamic>.from(
-            localSymbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'});
         return StatefulBuilder(builder: (contextModal, setModal) {
           void _toggleTf(String tf) async {
-            final tfs = List<String>.from(prefsForSymbol['timeframes'] ?? []);
+            final currentPrefs = Map<String, dynamic>.from(
+              widget.symbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'}
+            );
+            final tfs = List<String>.from(currentPrefs['timeframes'] ?? []);
             if (tfs.contains(tf)) {
               tfs.remove(tf);
             } else {
               tfs.add(tf);
             }
-            prefsForSymbol['timeframes'] = tfs;
-            localSymbolPrefs[symbol] = prefsForSymbol;
-            await _saveAndNotify();
-            setModal(() {});
+            currentPrefs['timeframes'] = tfs;
+            await widget.onSymbolPrefChanged(symbol, currentPrefs);
           }
 
           void _setDirection(String dir) async {
-            prefsForSymbol['direction'] = dir;
-            localSymbolPrefs[symbol] = prefsForSymbol;
-            await _saveAndNotify();
-            setModal(() {});
+            final currentPrefs = Map<String, dynamic>.from(
+              widget.symbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'}
+            );
+            currentPrefs['direction'] = dir;
+            await widget.onSymbolPrefChanged(symbol, currentPrefs);
           }
 
           return Padding(
@@ -560,7 +487,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     children: timeframes.map((tf) {
-                      final isActive = (prefsForSymbol['timeframes'] as List<dynamic>).contains(tf);
+                      final isActive = (widget.symbolPrefs[symbol]?['timeframes'] as List<dynamic>? ?? []).contains(tf);
                       return Padding(
                         padding: const EdgeInsets.all(4.0),
                         child: ElevatedButton(
@@ -578,7 +505,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   Wrap(
                     spacing: 8,
                     children: ['BUY','SELL','BUY&SELL'].map((pos) {
-                      final isActive = prefsForSymbol['direction'] == pos;
+                      final isActive = widget.symbolPrefs[symbol]?['direction'] == pos;
                       return ElevatedButton(
                         style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
                         onPressed: () => _setDirection(pos),
@@ -641,7 +568,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
 class ModeSettingsPage extends StatefulWidget {
   final String initialMode;
   final String userId;
-  final Function(String) onModeChanged;
+  final Future<void> Function(String) onModeChanged;
 
   const ModeSettingsPage({
     super.key,
@@ -673,7 +600,7 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
     final bits = widget.initialMode.padRight(7, '0').substring(0, 7);
     modeMap = {
       'A1': bits[0] == '1',
-      'A2': bits[0] == '0', 
+      'A2': bits[0] == '0',
       'B': bits[1] == '1',
       'C': bits[2] == '1',
       'D': bits[3] == '1',
@@ -723,11 +650,13 @@ class _ModeSettingsPageState extends State<ModeSettingsPage> {
         await widget.onModeChanged(newModeStr);
       } else {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('خطا در ثبت مود. دوباره تلاش کنید')));
+          const SnackBar(content: Text('خطا در ثبت مود. دوباره تلاش کنید.')),
+        );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('خطا: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('اتصال به سرور برقرار نشد: $e')),
+      );
     }
   }
 
