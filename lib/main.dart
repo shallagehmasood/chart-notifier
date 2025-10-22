@@ -11,8 +11,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 
-// ⚠️ حتماً آی‌پی کامپیوترت رو جایگزین کن!
-const String SERVER_URL = 'http://178.63.171.244:5000'; // ← اینجا آی‌پی واقعیت رو بذار
+// ✅ آدرس سرور شما
+const String SERVER_URL = 'http://178.63.171.244:5000';
 
 final List<String> symbols = [
   'EURUSD','XAUUSD','GBPUSD','USDJPY','USDCHF',
@@ -209,35 +209,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openSessionModal() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: sessions.map((s) {
-              final selected = sessionPrefs[s] ?? false;
-              return ListTile(
-                trailing: Checkbox(
-                  value: selected,
-                  onChanged: (newValue) {
-                    if (newValue != null) {
-                      _toggleSessionConfirmed(s, newValue);
-                    }
-                  },
-                ),
-                title: Text(s, textAlign: TextAlign.right),
-              );
-            }).toList(),
-          ),
-        );
-      },
-    );
-  }
-
   // ---------------- Mode Settings ----------------
   Future<void> _updateModeConfirmed(String newMode) async {
     try {
@@ -260,23 +231,6 @@ class _HomePageState extends State<HomePage> {
         SnackBar(content: Text('اتصال به سرور برقرار نشد: $e')),
       );
     }
-  }
-
-  void _openModeSettings() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return ModeSettingsPage(
-          initialMode: userMode,
-          userId: _userId,
-          onModeChanged: _updateModeConfirmed,
-        );
-      },
-    );
   }
 
   // ---------------- Symbol & Image Handling ----------------
@@ -306,7 +260,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadImagesFromServer() async {
-    // برای حالا خالی برمی‌گردونیم — بعداً پیاده‌سازی می‌شه
     if (mounted) setState(() {
       _receivedImages = [];
     });
@@ -371,9 +324,10 @@ class _HomePageState extends State<HomePage> {
               userId: _userId,
               userMode: userMode,
               symbolPrefs: symbolPrefs,
-              onSessionSettingsPressed: _openSessionModal,
+              sessionPrefs: sessionPrefs, // ✅ پاس داده شد
               onModeSettingsPressed: _openModeSettings,
               onSymbolPrefChanged: _updateSymbolPrefConfirmed,
+              onSessionChanged: _toggleSessionConfirmed, // ✅ پاس داده شد
             ),
           ),
           const Divider(thickness: 2, color: Colors.grey, height: 0),
@@ -419,6 +373,23 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
+  void _openModeSettings() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return ModeSettingsPage(
+          initialMode: userMode,
+          userId: _userId,
+          onModeChanged: _updateModeConfirmed,
+        );
+      },
+    );
+  }
 }
 
 // ---------- SettingsPanel ----------
@@ -426,18 +397,20 @@ class SettingsPanel extends StatefulWidget {
   final String userId;
   final String userMode;
   final Map<String, dynamic> symbolPrefs;
-  final VoidCallback onSessionSettingsPressed;
+  final Map<String, bool> sessionPrefs; // ✅ اضافه شد
   final VoidCallback onModeSettingsPressed;
   final Future<void> Function(String symbol, Map<String, dynamic> prefs) onSymbolPrefChanged;
+  final Future<void> Function(String session, bool value) onSessionChanged; // ✅ اضافه شد
 
   const SettingsPanel({
     super.key,
     required this.userId,
     required this.userMode,
     required this.symbolPrefs,
-    required this.onSessionSettingsPressed,
+    required this.sessionPrefs, // ✅
     required this.onModeSettingsPressed,
     required this.onSymbolPrefChanged,
+    required this.onSessionChanged, // ✅
   });
 
   @override
@@ -450,75 +423,115 @@ class _SettingsPanelState extends State<SettingsPanel> {
       context: context,
       isScrollControlled: true,
       builder: (_) {
-        return StatefulBuilder(builder: (contextModal, setModal) {
-          void _toggleTf(String tf) async {
-            final currentPrefs = Map<String, dynamic>.from(
-              widget.symbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'}
-            );
-            final tfs = List<String>.from(currentPrefs['timeframes'] ?? []);
-            if (tfs.contains(tf)) {
-              tfs.remove(tf);
-            } else {
-              tfs.add(tf);
+        return StatefulBuilder(
+          builder: (contextModal, setModal) {
+            void _toggleTf(String tf) async {
+              final currentPrefs = Map<String, dynamic>.from(
+                widget.symbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'}
+              );
+              final tfs = List<String>.from(currentPrefs['timeframes'] ?? []);
+              if (tfs.contains(tf)) {
+                tfs.remove(tf);
+              } else {
+                tfs.add(tf);
+              }
+              currentPrefs['timeframes'] = tfs;
+              await widget.onSymbolPrefChanged(symbol, currentPrefs);
+              setModal(() {}); // ✅ مودال را بازسازی کن
             }
-            currentPrefs['timeframes'] = tfs;
-            await widget.onSymbolPrefChanged(symbol, currentPrefs);
-          }
 
-          void _setDirection(String dir) async {
-            final currentPrefs = Map<String, dynamic>.from(
-              widget.symbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'}
+            void _setDirection(String dir) async {
+              final currentPrefs = Map<String, dynamic>.from(
+                widget.symbolPrefs[symbol] ?? {'timeframes': [], 'direction': 'BUY&SELL'}
+              );
+              currentPrefs['direction'] = dir;
+              await widget.onSymbolPrefChanged(symbol, currentPrefs);
+              setModal(() {}); // ✅
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 8),
+                    Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                    const SizedBox(height: 8),
+                    GridView.count(
+                      crossAxisCount: 5,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: timeframes.map((tf) {
+                        // ✅ همیشه از widget.symbolPrefs بخوان
+                        final isActive = (widget.symbolPrefs[symbol]?['timeframes'] as List<dynamic>? ?? []).contains(tf);
+                        return Padding(
+                          padding: const EdgeInsets.all(4.0),
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              shape: const CircleBorder(),
+                              padding: EdgeInsets.zero,
+                              backgroundColor: isActive ? Colors.green : Colors.red,
+                            ),
+                            onPressed: () => _toggleTf(tf),
+                            child: Text(tf, style: const TextStyle(fontSize: 11)),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      children: ['BUY','SELL','BUY&SELL'].map((pos) {
+                        // ✅ همیشه از widget.symbolPrefs بخوان
+                        final isActive = widget.symbolPrefs[symbol]?['direction'] == pos;
+                        return ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
+                          onPressed: () => _setDirection(pos),
+                          child: Text(pos),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
             );
-            currentPrefs['direction'] = dir;
-            await widget.onSymbolPrefChanged(symbol, currentPrefs);
-          }
+          },
+        );
+      },
+    );
+  }
 
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
-            child: SingleChildScrollView(
+  void _openSessionModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) {
+        return StatefulBuilder(
+          builder: (contextModal, setModal) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(contextModal).viewInsets.bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 8),
-                  Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  const SizedBox(height: 8),
-                  GridView.count(
-                    crossAxisCount: 5,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: timeframes.map((tf) {
-                      final isActive = (widget.symbolPrefs[symbol]?['timeframes'] as List<dynamic>? ?? []).contains(tf);
-                      return Padding(
-                        padding: const EdgeInsets.all(4.0),
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            shape: const CircleBorder(),
-                            padding: EdgeInsets.zero,
-                            backgroundColor: isActive ? Colors.green : Colors.red,
-                          ),
-                          onPressed: () => _toggleTf(tf),
-                          child: Text(tf, style: const TextStyle(fontSize: 11)),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  Wrap(
-                    spacing: 8,
-                    children: ['BUY','SELL','BUY&SELL'].map((pos) {
-                      final isActive = widget.symbolPrefs[symbol]?['direction'] == pos;
-                      return ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: isActive ? Colors.green : Colors.red),
-                        onPressed: () => _setDirection(pos),
-                        child: Text(pos),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                children: sessions.map((s) {
+                  final selected = widget.sessionPrefs[s] ?? false;
+                  return ListTile(
+                    trailing: Checkbox(
+                      value: selected,
+                      onChanged: (newValue) async {
+                        if (newValue != null) {
+                          await widget.onSessionChanged(s, newValue);
+                          setModal(() {}); // ✅ مودال را بازسازی کن
+                        }
+                      },
+                    ),
+                    title: Text(s, textAlign: TextAlign.right),
+                  );
+                }).toList(),
               ),
-            ),
-          );
-        });
+            );
+          },
+        );
       },
     );
   }
@@ -552,7 +565,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
               ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
-                onPressed: widget.onSessionSettingsPressed,
+                onPressed: _openSessionModal, // ✅ از اینجا فراخوانی شود
                 icon: const Icon(Icons.access_time),
                 label: const Text('Session Settings'),
               ),
