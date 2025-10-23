@@ -1,8 +1,8 @@
 // lib/screens/settings_page.dart
 
 import 'package:flutter/material.dart';
-import 'models/models.dart';
-import 'services/api_service.dart';
+import '../models/models.dart';
+import '../services/api_service.dart';
 
 class SettingsPage extends StatefulWidget {
   final int userId;
