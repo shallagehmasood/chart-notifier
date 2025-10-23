@@ -1,8 +1,8 @@
 // lib/screens/outbox_page.dart
 
 import 'package:flutter/material.dart';
-import 'package:signal_bot/services/api_service.dart';
-import 'package:signal_bot/models/models.dart';
+import 'package:chart-notifier/services/api_service.dart';
+import 'package:chart-notifier/models/models.dart';
 
 class OutboxPage extends StatefulWidget {
   final int userId;
