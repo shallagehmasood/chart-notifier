@@ -51,7 +51,7 @@ class _SettingsPageState extends State<SettingsPage> {
               value: _settings.modes['A1'] ?? false,
               onChanged: (bool? value) {
                 setState(() {
-                  _settings.modes['A1'] = value;
+                  _settings.modes['A1'] = value ?? false;
                 });
               },
             ),
@@ -62,7 +62,7 @@ class _SettingsPageState extends State<SettingsPage> {
               value: _settings.sessions['TOKYO'] ?? false,
               onChanged: (bool? value) {
                 setState(() {
-                  _settings.sessions['TOKYO'] = value;
+                  _settings.sessions['TOKYO'] = value ?? false;
                 });
               },
             ),
