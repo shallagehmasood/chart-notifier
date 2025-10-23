@@ -2,7 +2,7 @@
 
 import 'dart:convert'; 
 import 'package:http/http.dart' as http;
-import 'package:chart-notifier/models/models.dart';
+import '../models/models.dart';
 
 class ApiService {
   final String baseUrl = 'http://178.63.171.244:8000'; // آدرس سرور خود را وارد کنید
