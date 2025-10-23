@@ -1,4 +1,4 @@
-name: signal_chart_app
+name: chart-notifier
 description: مدیریت سیگنال چارت
 publish_to: "none"
 version: 1.0.0+1
