@@ -1,4 +1,4 @@
-name: chart-notifier
+name:Alert_X
 description: مدیریت سیگنال چارت
 publish_to: "none"
 version: 1.0.0+1
