@@ -1,8 +1,8 @@
 // lib/screens/settings_page.dart
 
 import 'package:flutter/material.dart';
-import 'package:signal_bot/models/models.dart';
-import 'package:signal_bot/services/api_service.dart';
+import 'package:chart-notifier/models/models.dart';
+import 'package:chart-notifier/services/api_service.dart';
 
 class SettingsPage extends StatefulWidget {
   final int userId;
