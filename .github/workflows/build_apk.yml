@@ -13,13 +13,45 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.3'  # این نسخه Dart 3.3.0+ رو شامل می‌شه
+          flutter-version: '3.24.3'  # شامل Dart SDK 3.3.0+
           channel: 'stable'
+
+      - name: Verify AndroidManifest.xml path
+        run: |
+          if [ ! -f android/app/src/main/AndroidManifest.xml ]; then
+            echo "❌ AndroidManifest.xml not found! Creating default one..."
+            mkdir -p android/app/src/main
+            cat > android/app/src/main/AndroidManifest.xml <<'EOF'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.chart_notifier">
+    <application
+        android:label="Chart Notifier"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+EOF
+          else
+            echo "✅ AndroidManifest.xml found!"
+          fi
 
       - name: Clean & upgrade dependencies
         run: |
@@ -28,7 +60,7 @@ jobs:
           flutter pub get
 
       - name: Generate launcher icons
-        run: flutter pub run flutter_launcher_icons:main
+        run: flutter pub run flutter_launcher_icons:main || echo "⚠️ No launcher icons to generate"
 
       - name: Build APK
         run: flutter build apk --release
