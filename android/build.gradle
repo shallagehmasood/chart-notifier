@@ -1,14 +1,15 @@
 plugins {
     id 'com.android.application'
     id 'kotlin-android'
+    id 'com.google.gms.google-services' // Firebase plugin
 }
 
 android {
-    namespace "com.example.chart_notifier" // ← نام پکیج خودت رو اینجا بذار
+    namespace "com.example.chart_notifier_app"
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.chart_notifier" // ← نام پکیج خودت رو اینجا بذار
+        applicationId "com.example.chart_notifier_app"
         minSdk 21
         targetSdk 34
         versionCode 1
@@ -31,7 +32,7 @@ android {
         release {
             shrinkResources false
             minifyEnabled false
-            signingConfig signingConfigs.debug // ← اگر کلید امضا داری، اینو تغییر بده
+            signingConfig signingConfigs.debug // اگر کلید release داری، اینو تغییر بده
         }
     }
 }
@@ -41,6 +42,11 @@ dependencies {
     implementation 'androidx.multidex:multidex:2.0.1'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
-    // سایر وابستگی‌ها (مثلاً برای flutter_local_notifications)
+    // Firebase
+    implementation platform('com.google.firebase:firebase-bom:34.2.0')
+    implementation 'com.google.firebase:firebase-messaging'
+    implementation 'com.google.firebase:firebase-analytics'
+
+    // سایر وابستگی‌ها
     implementation 'androidx.core:core-ktx:1.12.0'
 }
