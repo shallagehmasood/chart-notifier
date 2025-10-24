@@ -13,12 +13,12 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.3'  # شامل Dart SDK 3.3.0+
+          flutter-version: '3.24.3'  # ??? ???? Dart 3.3.0+ ?? ???? ?????
           channel: 'stable'
 
       - name: Verify AndroidManifest.xml path
@@ -52,7 +52,6 @@ EOF
           else
             echo "✅ AndroidManifest.xml found!"
           fi
-
       - name: Clean & upgrade dependencies
         run: |
           flutter clean
@@ -60,7 +59,7 @@ EOF
           flutter pub get
 
       - name: Generate launcher icons
-        run: flutter pub run flutter_launcher_icons:main || echo "⚠️ No launcher icons to generate"
+        run: flutter pub run flutter_launcher_icons:main
 
       - name: Build APK
         run: flutter build apk --release
