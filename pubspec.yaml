@@ -1,5 +1,5 @@
-name: Alert_X
-description: "مدیریت سیگنال چارت"
+name: signal_chart_app
+description: ?????? ?????? ????
 publish_to: "none"
 version: 1.0.0+1
 
@@ -17,12 +17,6 @@ dependencies:
   permission_handler: ^11.3.1
   path_provider: ^2.0.15
   video_player: ^2.6.0
-  flutter_secure_storage: ^4.2.0
-  provider: ^6.0.1
-  cached_network_image: ^3.2.0
-  flutter_local_notifications: ^17.2.1
-  
-
 
 dev_dependencies:
   flutter_test:
