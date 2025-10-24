@@ -1,35 +1,42 @@
+
+
 name: Build Flutter APK
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build APK
+  build_apk:
+    name: Build Flutter APK
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout source code
+        uses: actions/checkout@v3
 
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.13.0' # می‌توانید نسخه دلخواه Flutter را تغییر دهید
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'  # ??? ???? Dart 3.3.0+ ?? ???? ?????
+          channel: 'stable'
 
-    - name: Flutter pub get
-      run: flutter pub get
+      - name: Clean & upgrade dependencies
+        run: |
+          flutter clean
+          flutter pub upgrade --major-versions
+          flutter pub get
 
-    - name: Build APK
-      run: flutter build apk --release
+      - name: Generate launcher icons
+        run: flutter pub run flutter_launcher_icons:main
 
-    - name: Upload APK as artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: release-apk
-        path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
