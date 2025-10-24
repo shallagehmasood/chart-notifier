@@ -1,61 +1,120 @@
-// lib/screens/outbox_page.dart
-
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/api_service.dart';
-import '../models/models.dart';
 
 class OutboxPage extends StatefulWidget {
   final int userId;
+  final String? highlightFile;
 
-  const OutboxPage({Key? key, required this.userId}) : super(key: key);
+  const OutboxPage({Key? key, required this.userId, this.highlightFile}) : super(key: key);
 
   @override
-  _OutboxPageState createState() => _OutboxPageState();
+  State<OutboxPage> createState() => _OutboxPageState();
 }
 
 class _OutboxPageState extends State<OutboxPage> {
-  late ApiService _apiService;
-  late Future<List<FileModel>> _files;
+  List<Map<String, dynamic>> items = [];
+  bool loading = true;
+  final scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _apiService = ApiService();
-    _files = _apiService.getOutbox(widget.userId);
+    _load();
+  }
+
+  Future<void> _load() async {
+    final res = await ApiService.fetchOutbox(widget.userId);
+    setState(() {
+      items = res;
+      loading = false;
+    });
+
+    if (widget.highlightFile != null) {
+      final index = items.indexWhere((it) => it['file'] == widget.highlightFile);
+      if (index != -1) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          scrollController.animateTo(
+            index * 220.0,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
+          );
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
     return Scaffold(
-      appBar: AppBar(title: Text('Outbox')),
-      body: FutureBuilder<List<FileModel>>(
-        future: _files,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            return Center(child: Text('Failed to load files'));
-          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return Center(child: Text('No files found'));
+      appBar: AppBar(title: const Text('Outbox')),
+      body: ListView.builder(
+        controller: scrollController,
+        itemCount: items.length,
+        itemBuilder: (ctx, i) {
+          final it = items[i];
+          final isHighlighted = widget.highlightFile != null && it['file'] == widget.highlightFile;
+
+          Widget content = Column(
+            children: [
+              CachedNetworkImage(
+                imageUrl: it['url'],
+                placeholder: (_, __) => const SizedBox(
+                  height: 150,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                errorWidget: (_, __, ___) => const Icon(Icons.broken_image, size: 80),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(it['caption'] ?? ''),
+              ),
+              ButtonBar(
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.download),
+                    label: const Text('دانلود'),
+                    onPressed: () => ApiService.downloadFile(widget.userId, it['file']),
+                  ),
+                ],
+              ),
+            ],
+          );
+
+          if (isHighlighted) {
+            content = TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.8, end: 1.2),
+              duration: const Duration(seconds: 1),
+              curve: Curves.easeInOut,
+              builder: (context, scale, child) {
+                return Transform.scale(scale: scale, child: child);
+              },
+              onEnd: () => setState(() {}),
+              child: content,
+            );
           }
 
-          final files = snapshot.data!;
-          return ListView.builder(
-            itemCount: files.length,
-            itemBuilder: (context, index) {
-              final file = files[index];
-              return ListTile(
-                leading: Icon(Icons.image),
-                title: Text(file.file),
-                subtitle: Text(file.caption),
-                onTap: () async {
-                  final response = await _apiService.downloadFile(widget.userId, file.file);
-                  if (response.statusCode == 200) {
-                    // ذخیره یا نمایش فایل دانلود شده
-                  }
-                },
-              );
-            },
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 500),
+            margin: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: isHighlighted ? Colors.amber : Colors.transparent,
+                width: 3,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                if (isHighlighted)
+                  BoxShadow(
+                    color: Colors.amber.withOpacity(0.5),
+                    blurRadius: 12,
+                    spreadRadius: 2,
+                  )
+              ],
+            ),
+            child: content,
           );
         },
       ),
