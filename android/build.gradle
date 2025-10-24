@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace "com.example.chart_notifier_app" // ← نام پکیج خودت رو اینجا بذار
+    namespace "com.example.chart_notifier" // ← نام پکیج خودت رو اینجا بذار
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.chart_notifier_app" // ← نام پکیج خودت رو اینجا بذار
+        applicationId "com.example.chart_notifier" // ← نام پکیج خودت رو اینجا بذار
         minSdk 21
         targetSdk 34
         versionCode 1
