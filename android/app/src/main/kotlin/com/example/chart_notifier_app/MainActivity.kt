@@ -1,4 +1,4 @@
-package com.example.chart_notifier_app
+package com.example.chart_notifier
 
 import io.flutter.embedding.android.FlutterActivity
 
