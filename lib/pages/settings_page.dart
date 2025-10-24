@@ -156,8 +156,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // directions list local
-  List<String> get directions => ['BUY','SELL','BUYSELL'];
 
   @override
   Widget build(BuildContext context) {
