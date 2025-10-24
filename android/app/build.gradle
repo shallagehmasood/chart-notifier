@@ -7,11 +7,11 @@ plugins {
 
 android {
     ndkVersion = "27.0.12077973"
-    namespace "com.example.chart_notifier_app" // ✅ مقدار namespace صحیح
+    namespace "com.example.chart_notifier" // ✅ مقدار namespace صحیح
     compileSdk = 36                       // ✅ ارتقا به SDK 36
 
     defaultConfig {
-        applicationId "com.example.chart_notifier_app" // ✅ هماهنگ با namespace
+        applicationId "com.example.chart_notifier" // ✅ هماهنگ با namespace
         minSdk = 23
         targetSdk = 36
         versionCode = 1
