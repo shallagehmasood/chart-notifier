@@ -1,71 +1,48 @@
-name: Build Flutter APK
+name: Build Flutter APK and Upload to Google Drive
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  build_apk:
-    name: Build Flutter APK
+  build:
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.24.3'  # ??? ???? Dart 3.3.0+ ?? ???? ?????
-          channel: 'stable'
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.13.0'
 
-      - name: Verify AndroidManifest.xml path
-        run: |
-          if [ ! -f android/app/src/main/AndroidManifest.xml ]; then
-            echo "❌ AndroidManifest.xml not found! Creating default one..."
-            mkdir -p android/app/src/main
-            cat > android/app/src/main/AndroidManifest.xml <<'EOF'
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.chart_notifier">
-    <application
-        android:label="Chart Notifier"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-            android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
-EOF
-          else
-            echo "✅ AndroidManifest.xml found!"
-          fi
-      - name: Clean & upgrade dependencies
-        run: |
-          flutter clean
-          flutter pub upgrade --major-versions
-          flutter pub get
+    - name: Flutter pub get
+      run: flutter pub get
 
-      - name: Generate launcher icons
-        run: flutter pub run flutter_launcher_icons:main
+    - name: Build APK
+      run: flutter build apk --release
 
-      - name: Build APK
-        run: flutter build apk --release
+    - name: Install rclone
+      run: |
+        curl https://rclone.org/install.sh | sudo bash
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+    - name: Configure rclone
+      run: |
+        mkdir -p ~/.config/rclone
+        echo "${{ secrets.GDRIVE_CREDENTIALS }}" > ~/.config/rclone/credentials.json
+        cat > ~/.config/rclone/rclone.conf <<EOL
+        [gdrive]
+        type = drive
+        service_account_file = ~/.config/rclone/credentials.json
+        scope = drive
+        EOL
+
+    - name: Upload APK to Google Drive
+      run: |
+        rclone copy build/app/outputs/flutter-apk/app-release.apk gdrive:/${{ secrets.GDRIVE_FOLDER_ID }} -v
